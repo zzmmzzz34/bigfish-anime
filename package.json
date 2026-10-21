@@ -1,0 +1,43 @@
+{
+  "name": "bigfish-anime",
+  "version": "0.8.0",
+  "private": true,
+  "type": "module",
+  "description": "大肥鱼番剧 — 本地动漫聚合播放站",
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"tsx watch server/index.ts\" \"vite --config web/vite.config.ts\"",
+    "dev:api": "tsx watch server/index.ts",
+    "dev:web": "vite --config web/vite.config.ts",
+    "build": "vite build --config web/vite.config.ts",
+    "start": "tsx server/index.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  },
+  "dependencies": {
+    "bangumi-data": "^0.3.231",
+    "express": "^5.3.0",
+    "hls.js": "^1.7.3",
+    "lucide-react": "^1.59.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.4"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/express": "^5.0.6",
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "concurrently": "^10.0.6",
+    "playwright-core": "^1.64.1",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  }
+}

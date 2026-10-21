@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": false,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "resolveJsonModule": true,
+    "types": ["node"],
+    "paths": {
+      "@/*": ["./web/src/*"]
+    }
+  },
+  "include": ["server/**/*.ts", "web/src/**/*.ts", "web/src/**/*.tsx", "web/vite.config.ts"]
+}

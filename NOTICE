@@ -1,0 +1,9 @@
+This project includes data derived from bangumi-data:
+https://github.com/bangumi-data/bangumi-data
+Licensed under CC BY 4.0.
+
+AniCh and Kazumi are referenced for architecture ideas only; no source code
+from those projects is included here.
+
+DanDanPlay integration, when enabled, is subject to the DanDanPlay Open
+Danmaku Network terms of use.
