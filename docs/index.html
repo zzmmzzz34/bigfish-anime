@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>大肥鱼番剧 · 本地动漫聚合播放器</title>
+<meta name="description" content="大肥鱼番剧是一个本地运行的动漫聚合播放器：AniList 新番与周表、Bangumi 评分与中文简介、多源线路、B站弹幕、SQLite 缓存。" />
+<meta property="og:title" content="大肥鱼番剧 · 本地动漫聚合播放器" />
+<meta property="og:description" content="把番剧、线路和弹幕收进一个干净的地方。" />
+<meta property="og:image" content="screenshots/home.png" />
+<meta property="og:type" content="website" />
+<style>
+  :root {
+    --bg: #070709;
+    --panel: #101014;
+    --line: rgba(255, 255, 255, 0.08);
+    --text: #f5f5f7;
+    --muted: #9698a3;
+    --accent: #ff4d6d;
+    --accent-2: #ff8a5c;
+    --radius: 18px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(900px 520px at 78% -8%, rgba(255, 77, 109, 0.16), transparent 65%),
+      radial-gradient(700px 420px at 8% 18%, rgba(255, 138, 92, 0.08), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; text-decoration: none; }
+  .wrap { width: min(1180px, calc(100% - 40px)); margin: 0 auto; }
+  .nav {
+    position: sticky; top: 0; z-index: 10;
+    backdrop-filter: blur(18px);
+    background: rgba(7, 7, 9, 0.74);
+    border-bottom: 1px solid var(--line);
+  }
+  .nav-inner { height: 66px; display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; letter-spacing: 0.5px; }
+  .brand-mark {
+    width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    color: #22060b; font-size: 16px; font-weight: 900;
+  }
+  .nav-links { display: flex; align-items: center; gap: 20px; font-size: 13px; color: var(--muted); }
+  .nav-links a:hover { color: #fff; }
+  .nav-cta {
+    padding: 8px 14px; border: 1px solid var(--line); border-radius: 9px; color: #fff;
+    background: rgba(255,255,255,.04);
+  }
+  .hero { padding: 76px 0 56px; display: grid; grid-template-columns: 1.05fr .95fr; gap: 48px; align-items: center; }
+  .eyebrow {
+    display: inline-flex; align-items: center; gap: 8px; padding: 5px 10px;
+    border: 1px solid rgba(255, 77, 109, .3); border-radius: 999px;
+    color: #ffb3c0; background: rgba(255, 77, 109, .08);
+    font-size: 10.5px; letter-spacing: 1.4px; text-transform: uppercase;
+  }
+  .dot { width: 5px; height: 5px; border-radius: 50%; background: #ff6b81; box-shadow: 0 0 8px #ff4d6d; }
+  h1 { margin: 20px 0 18px; font-size: clamp(38px, 5vw, 62px); line-height: 1.08; letter-spacing: -1.8px; }
+  h1 em { font-style: normal; background: linear-gradient(100deg, #ffb0bc, #ff4d6d 60%, #ff9a62); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { margin: 0; max-width: 560px; color: #b7b8c2; font-size: 15px; line-height: 1.85; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 28px; }
+  .btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    min-height: 42px; padding: 0 18px; border-radius: 10px; font-size: 13px; font-weight: 600;
+    border: 1px solid var(--line); color: #e9e9ee; background: rgba(255,255,255,.04);
+    transition: .18s ease;
+  }
+  .btn:hover { transform: translateY(-1px); border-color: rgba(255,255,255,.2); }
+  .btn-primary { border: 0; color: #24060c; background: linear-gradient(135deg, #ff8aa0, #ff4d6d 55%, #ff8a5c); }
+  .hero-shot { position: relative; }
+  .hero-shot::before {
+    content: ""; position: absolute; inset: 8% 6%; background: #ff4d6d; filter: blur(70px); opacity: .2; border-radius: 40px;
+  }
+  .screen {
+    position: relative; border: 1px solid rgba(255,255,255,.12); border-radius: 16px; overflow: hidden;
+    background: #0b0b0e; box-shadow: 0 30px 80px rgba(0,0,0,.55);
+  }
+  .screen img { display: block; width: 100%; height: auto; }
+  .screen-bar { height: 28px; display: flex; align-items: center; gap: 5px; padding: 0 10px; border-bottom: 1px solid var(--line); background: #111116; }
+  .screen-bar i { width: 6px; height: 6px; border-radius: 50%; background: #3a3b45; display: block; }
+  .section { padding: 44px 0 10px; }
+  .section-head { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
+  .kicker { color: #ff8fa3; font-size: 10.5px; letter-spacing: 1.5px; text-transform: uppercase; }
+  h2 { margin: 8px 0 0; font-size: clamp(24px, 2.6vw, 34px); letter-spacing: -0.8px; }
+  .section-head p { margin: 0; max-width: 440px; color: var(--muted); font-size: 12.5px; line-height: 1.7; }
+  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+  .feature {
+    padding: 18px; border: 1px solid var(--line); border-radius: 14px;
+    background: linear-gradient(160deg, rgba(255,255,255,.045), rgba(255,255,255,.015));
+  }
+  .feature-icon {
+    width: 32px; height: 32px; border-radius: 9px; display: grid; place-items: center;
+    color: #ff9cac; background: rgba(255, 77, 109, .1); border: 1px solid rgba(255,77,109,.16);
+    font-size: 15px;
+  }
+  .feature h3 { margin: 12px 0 6px; font-size: 14px; }
+  .feature p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
+  .gallery { display: grid; grid-template-columns: 1.25fr .75fr; gap: 12px; }
+  .gallery .screen img { height: 100%; object-fit: cover; }
+  .gallery-side { display: grid; gap: 12px; }
+  .shot-label { margin: 8px 2px 0; font-size: 10.5px; color: #676974; letter-spacing: .3px; }
+  .start {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 28px; align-items: start;
+    padding: 28px; border: 1px solid var(--line); border-radius: var(--radius);
+    background: linear-gradient(150deg, rgba(255,255,255,.045), rgba(255,255,255,.012));
+  }
+  .steps { margin: 0; padding: 0; list-style: none; counter-reset: step; }
+  .steps li { position: relative; padding: 0 0 17px 34px; color: #b9bac4; font-size: 13px; line-height: 1.7; }
+  .steps li::before {
+    counter-increment: step; content: counter(step);
+    position: absolute; left: 0; top: 1px; width: 22px; height: 22px; border-radius: 7px;
+    display: grid; place-items: center; font-size: 10px; font-weight: 700; color: #ffb6c2;
+    background: rgba(255,77,109,.1); border: 1px solid rgba(255,77,109,.25);
+  }
+  code {
+    padding: 2px 6px; border-radius: 5px; background: rgba(255,255,255,.07);
+    border: 1px solid rgba(255,255,255,.06); color: #ffd4dc; font-size: 12px;
+    font-family: "Cascadia Code", Consolas, monospace;
+  }
+  .note { margin: 26px 0 0; padding: 16px 18px; border-left: 2px solid #ff4d6d; background: rgba(255,77,109,.055); border-radius: 0 10px 10px 0; color: #a9aab5; font-size: 12px; line-height: 1.8; }
+  footer { margin-top: 40px; border-top: 1px solid var(--line); padding: 22px 0 40px; color: #6d6f7a; font-size: 11.5px; }
+  .footer-inner { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; }
+  .footer-links { display: flex; gap: 16px; }
+  .footer-links a:hover { color: #fff; }
+  @media (max-width: 900px) {
+    .hero { grid-template-columns: 1fr; gap: 32px; padding-top: 52px; }
+    .features { grid-template-columns: 1fr 1fr; }
+    .gallery { grid-template-columns: 1fr; }
+    .gallery-side { grid-template-columns: 1fr 1fr; }
+    .start { grid-template-columns: 1fr; }
+    .nav-links a:not(.nav-cta) { display: none; }
+  }
+  @media (max-width: 560px) {
+    .wrap { width: calc(100% - 28px); }
+    .features { grid-template-columns: 1fr; }
+    .gallery-side { grid-template-columns: 1fr; }
+    .section-head { display: block; }
+    .section-head p { margin-top: 8px; }
+    h1 { letter-spacing: -1.2px; }
+  }
+</style>
+</head>
+<body>
+  <nav class="nav">
+    <div class="wrap nav-inner">
+      <a class="brand" href="#top"><span class="brand-mark">鱼</span>大肥鱼番剧</a>
+      <div class="nav-links">
+        <a href="#features">功能</a>
+        <a href="#screens">截图</a>
+        <a href="#start">本地运行</a>
+        <a class="nav-cta" href="https://github.com/zzmmzzz34/bigfish-anime" target="_blank" rel="noreferrer">GitHub ↗</a>
+      </div>
+    </div>
+  </nav>
+
+  <main id="top">
+    <section class="wrap hero">
+      <div>
+        <span class="eyebrow"><span class="dot"></span> Local Anime Player · v0.8</span>
+        <h1>把番剧、线路和弹幕<br /><em>收进一个干净的地方</em></h1>
+        <p class="lead">
+          大肥鱼番剧是一个本地运行的动漫聚合播放器：AniList 负责新番与周表，Bangumi 补中文评分与简介，
+          你的片源负责播放，B站弹幕负责热闹。没有广告，没有账号，也不提供在线片库。
+        </p>
+        <div class="actions">
+          <a class="btn btn-primary" href="https://github.com/zzmmzzz34/bigfish-anime" target="_blank" rel="noreferrer">查看 GitHub 仓库 ↗</a>
+          <a class="btn" href="#start">本地运行</a>
+        </div>
+      </div>
+      <div class="hero-shot">
+        <div class="screen">
+          <div class="screen-bar"><i></i><i></i><i></i></div>
+          <img src="screenshots/home.png" alt="大肥鱼番剧首页" fetchpriority="high" />
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap section" id="features">
+      <div class="section-head">
+        <div>
+          <div class="kicker">What it does</div>
+          <h2>信息优先，源退到线路里</h2>
+        </div>
+        <p>首页只负责「逛」，详情页负责「选」，播放页负责「看」。片源名、线路、画质只在需要时出现。</p>
+      </div>
+      <div class="features">
+        <article class="feature">
+          <div class="feature-icon">新</div>
+          <h3>AniList 新番与周表</h3>
+          <p>当季 30 部、周一至周日放送表、全球评分，不再被单一平台的番剧库限制。</p>
+        </article>
+        <article class="feature">
+          <div class="feature-icon">中</div>
+          <h3>中文标题 + Bangumi</h3>
+          <p>用 bangumi-data 把日文标题映射成中文；详情页补 Bangumi 评分、排名和中文简介。</p>
+        </article>
+        <article class="feature">
+          <div class="feature-icon">线</div>
+          <h3>多源线路与健康检查</h3>
+          <p>跨片源自动合并线路，探测可用性、延迟和真实成功率，自动选最稳的一条。</p>
+        </article>
+        <article class="feature">
+          <div class="feature-icon">弹</div>
+          <h3>B站弹幕</h3>
+          <p>B站番剧详情进入播放器时自动加载弹幕，按集缓存，和本地弹幕合并显示。</p>
+        </article>
+        <article class="feature">
+          <div class="feature-icon">缓</div>
+          <h3>SQLite 本地缓存</h3>
+          <p>Bangumi 元数据与集数落盘；反代域名被墙时，继续用上次缓存的评分和简介。</p>
+        </article>
+        <article class="feature">
+          <div class="feature-icon">净</div>
+          <h3>干净、无广告</h3>
+          <p>没有会员、没有弹窗、没有追踪；数据留在自己的电脑里，收藏和历史也不上云。</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="wrap section" id="screens">
+      <div class="section-head">
+        <div>
+          <div class="kicker">Screens</div>
+          <h2>它长这样</h2>
+        </div>
+        <p>深色界面、海报墙、周表、线路和弹幕。下面是真实截图，不是概念图。</p>
+      </div>
+      <div class="gallery">
+        <div>
+          <div class="screen">
+            <div class="screen-bar"><i></i><i></i><i></i></div>
+            <img src="screenshots/catalog.png" alt="番剧详情与 Bangumi 评分" loading="lazy" />
+          </div>
+          <div class="shot-label">番剧详情 · Bangumi 评分 / 中文简介 / 跨源线路</div>
+        </div>
+        <div class="gallery-side">
+          <div>
+            <div class="screen">
+              <div class="screen-bar"><i></i><i></i><i></i></div>
+              <img src="screenshots/danmaku.png" alt="播放器与 B站弹幕" loading="lazy" />
+            </div>
+            <div class="shot-label">播放器 · B站弹幕</div>
+          </div>
+          <div>
+            <div class="screen">
+              <div class="screen-bar"><i></i><i></i><i></i></div>
+              <img src="screenshots/schedule.png" alt="新番周报" loading="lazy" />
+            </div>
+            <div class="shot-label">新番周报 · 周一至周日</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="wrap section" id="start">
+      <div class="start">
+        <div>
+          <div class="kicker">Get started</div>
+          <h2>在自己的电脑上跑</h2>
+          <ul class="steps">
+            <li>安装 Node.js 24+ 与 pnpm；Windows 也可以直接用仓库里的 <code>start.bat</code>。</li>
+            <li>克隆仓库：<code>git clone https://github.com/zzmmzzz34/bigfish-anime.git</code></li>
+            <li>安装依赖：<code>pnpm install</code>，然后 <code>pnpm dev</code> 或双击 <code>start.bat</code>。</li>
+            <li>打开 <code>http://127.0.0.1:8787</code>，在「片源」里配置你自己的 MacCMS / Kazumi 接口。</li>
+          </ul>
+        </div>
+        <div>
+          <div class="panel" style="padding:20px;border:1px solid var(--line);border-radius:14px;background:rgba(255,255,255,.025)">
+            <div style="font-size:12px;color:#ff9cac;letter-spacing:1px;margin-bottom:10px">REQUIREMENTS</div>
+            <p style="margin:0 0 10px;color:#b9bac4;font-size:12.5px;line-height:1.8">
+              Node.js 24+ · pnpm · Windows / macOS / Linux
+            </p>
+            <p style="margin:0;color:#7f818c;font-size:11.5px;line-height:1.8">
+              播放内容来自你自行配置的第三方片源；本项目不存储、不转码、不分发视频文件。
+            </p>
+          </div>
+          <p class="note">
+            这是一个本地、非商业的学习/测试项目，不提供在线播放服务，也不对外提供片库。
+            B站 / AniList / Bangumi / DanDanPlay 的数据与接口归各自平台所有。
+          </p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap footer-inner">
+      <div>© 2026 大肥鱼工作室 · MIT License</div>
+      <div class="footer-links">
+        <a href="https://github.com/zzmmzzz34/bigfish-anime" target="_blank" rel="noreferrer">GitHub</a>
+        <a href="https://github.com/zzmmzzz34/bigfish-anime/blob/main/README.md" target="_blank" rel="noreferrer">README</a>
+        <a href="https://github.com/bangumi-data/bangumi-data" target="_blank" rel="noreferrer">bangumi-data · CC BY 4.0</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
