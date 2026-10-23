@@ -135,7 +135,17 @@ export default function Stage({
       hls.loadSource(src);
       hls.attachMedia(video);
       hls.on(Hls.Events.MANIFEST_PARSED, (_e, data) => {
-        setLevels(data.levels.map((l, i) => ({ height: l.height, index: i })));
+        const nextLevels = data.levels.map((l, i) => ({ height: l.height, index: i }));
+        setLevels(nextLevels);
+        const savedHeight = Number(localStorage.getItem('bf-quality-height') || 0);
+        if (savedHeight > 0) {
+          const idx = nextLevels.findIndex((l) => l.height === savedHeight);
+          if (idx >= 0) {
+            hls.currentLevel = idx;
+            hls.loadLevel = idx;
+            setLevel(idx);
+          }
+        }
         setLoading(false);
         if (autoPlay) video.play().catch(() => {});
       });
@@ -202,9 +212,29 @@ export default function Stage({
   }, [rate]);
 
   useEffect(() => {
-    const onChange = () => setFullscreen(Boolean(document.fullscreenElement));
+    const onChange = () => {
+      const fs = Boolean(document.fullscreenElement);
+      setFullscreen(fs);
+      const orientation = window.screen?.orientation as any;
+      try {
+        if (fs) {
+          orientation?.lock?.('landscape')?.catch?.(() => {});
+        } else {
+          orientation?.unlock?.();
+        }
+      } catch {
+        /* iOS / 桌面浏览器不支持方向锁 */
+      }
+    };
     document.addEventListener('fullscreenchange', onChange);
-    return () => document.removeEventListener('fullscreenchange', onChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onChange);
+      try {
+        (window.screen?.orientation as any)?.unlock?.();
+      } catch {
+        /* ignore */
+      }
+    };
   }, []);
 
   const showControls = useCallback(() => {
@@ -223,13 +253,41 @@ export default function Stage({
     };
   }, [showControls]);
 
+  const playVideo = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.play().catch(() => {});
+    showControls();
+  }, [showControls]);
+
   const toggle = useCallback(() => {
     const video = videoRef.current;
     if (!video) return;
-    if (video.paused) video.play().catch(() => {});
-    else video.pause();
+    // 手机上可能 paused=false 但 readyState=0、currentTime=0；
+    // 这种情况其实没在播，不能把它 pause 掉。
+    if (video.paused || !playing || video.readyState < 2 || video.currentTime === 0) {
+      playVideo();
+    } else {
+      video.pause();
+    }
     showControls();
-  }, [showControls]);
+  }, [playing, playVideo, showControls]);
+
+  const toggleMute = useCallback(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (video.muted || video.volume === 0 || muted) {
+      const next = volume > 0 ? volume : 0.85;
+      video.muted = false;
+      video.volume = next;
+      setMuted(false);
+      setVolume(next);
+    } else {
+      video.muted = true;
+      setMuted(true);
+    }
+    showControls();
+  }, [muted, volume, showControls]);
 
   const seekBy = useCallback((delta: number) => {
     const video = videoRef.current;
@@ -241,9 +299,21 @@ export default function Stage({
   const toggleFullscreen = useCallback(async () => {
     const el = stageRef.current;
     if (!el) return;
+    const video = videoRef.current as any;
     try {
-      if (!document.fullscreenElement) await el.requestFullscreen();
-      else await document.exitFullscreen();
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+        return;
+      }
+      if (el.requestFullscreen) {
+        try {
+          await el.requestFullscreen();
+          return;
+        } catch {
+          /* iOS 不支持容器全屏，走原生视频全屏 */
+        }
+      }
+      if (video?.webkitEnterFullscreen) video.webkitEnterFullscreen();
     } catch {
       /* ignore */
     }
@@ -252,9 +322,20 @@ export default function Stage({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement;
-      if (/INPUT|TEXTAREA|SELECT/.test(target?.tagName || '')) return;
+      if (
+        e.altKey ||
+        e.ctrlKey ||
+        e.metaKey ||
+        target?.isContentEditable ||
+        target?.closest?.('input,textarea,select,button,a,[role="button"],[contenteditable="true"]')
+      ) {
+        return;
+      }
       const video = videoRef.current;
       if (!video) return;
+      const repeatable = e.key.startsWith('Arrow');
+      if (e.repeat && !repeatable) return;
+
       switch (e.key) {
         case ' ':
           e.preventDefault();
@@ -262,11 +343,11 @@ export default function Stage({
           break;
         case 'ArrowLeft':
           e.preventDefault();
-          seekBy(-5);
+          seekBy(-10);
           break;
         case 'ArrowRight':
           e.preventDefault();
-          seekBy(5);
+          seekBy(10);
           break;
         case 'ArrowUp':
           e.preventDefault();
@@ -279,17 +360,31 @@ export default function Stage({
           break;
         case 'f':
         case 'F':
+          e.preventDefault();
           toggleFullscreen();
           break;
         case 'm':
         case 'M':
-          setMuted((m) => !m);
+          e.preventDefault();
+          toggleMute();
+          break;
+        case 'd':
+        case 'D':
+          e.preventDefault();
+          onToggleDanmaku?.();
+          break;
+        case 'n':
+        case 'N':
+          if (hasNext && onNext) {
+            e.preventDefault();
+            onNext();
+          }
           break;
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [toggle, seekBy, toggleFullscreen]);
+  }, [toggle, seekBy, toggleFullscreen, toggleMute, hasNext, onNext, onToggleDanmaku]);
 
   const applyInitial = (video: HTMLVideoElement) => {
     if (appliedInitial.current) return;
@@ -357,6 +452,14 @@ export default function Stage({
       <video
         ref={videoRef}
         playsInline
+        {...{
+          'webkit-playsinline': 'true',
+          'x5-playsinline': 'true',
+          'x5-video-player-type': 'h5',
+          'x5-video-player-fullscreen': 'false',
+        }}
+        disablePictureInPicture={/iPad|iPhone|iPod/.test(navigator.userAgent)}
+        controlsList="nodownload noplaybackrate noremoteplayback"
         preload="metadata"
         onClick={toggle}
         onDoubleClick={toggleFullscreen}
@@ -365,7 +468,15 @@ export default function Stage({
         onPlay={() => {
           setPlaying(true);
           setStarted(true);
+          const video = videoRef.current;
+          if (video) setMuted(video.muted || video.volume === 0);
           showControls();
+        }}
+        onVolumeChange={() => {
+          const video = videoRef.current;
+          if (!video) return;
+          setMuted(video.muted || video.volume === 0);
+          if (video.volume > 0) setVolume(video.volume);
         }}
         onPause={() => {
           setPlaying(false);
@@ -412,6 +523,22 @@ export default function Stage({
             />
           </div>
         </div>
+      )}
+
+      {!playing && !loading && !error && (
+        <button
+          type="button"
+          onClick={playVideo}
+          className="group/play absolute inset-0 z-[3] flex flex-col items-center justify-center gap-2.5 bg-[radial-gradient(circle_at_center,rgba(0,0,0,.35),transparent_58%)]"
+          aria-label="播放"
+        >
+          <span className="grid h-14 w-14 place-items-center rounded-full border border-white/20 bg-black/35 text-white/90 shadow-[0_8px_28px_rgba(0,0,0,.35)] backdrop-blur-md transition-all duration-200 group-hover/play:scale-105 group-hover/play:border-[#ff8aa0]/55 group-hover/play:text-white group-active/play:scale-95 sm:h-16 sm:w-16">
+            <Play size={23} fill="currentColor" strokeWidth={0} className="ml-0.5" />
+          </span>
+          <span className="rounded-full border border-white/10 bg-black/30 px-2.5 py-1 text-[9.5px] tracking-[0.16em] text-white/55 backdrop-blur-md">
+            点击播放
+          </span>
+        </button>
       )}
 
       <DanmakuLayer
@@ -504,7 +631,7 @@ export default function Stage({
           <div className="group/vol flex items-center">
             <button
               className="player-btn"
-              onClick={() => setMuted((m) => !m)}
+              onClick={toggleMute}
               aria-label={muted ? '取消静音' : '静音'}
             >
               {muted || volume === 0 ? <VolumeX size={18} /> : <Volume2 size={18} />}
@@ -526,7 +653,7 @@ export default function Stage({
             />
           </div>
 
-          <div className="ml-1 font-mono text-[12px] tabular-nums text-white/80">
+          <div className="player-time ml-1 font-mono text-[12px] tabular-nums text-white/80">
             {formatTime(current)}
             <span className="mx-1 text-white/30">/</span>
             {formatTime(duration)}
@@ -541,7 +668,7 @@ export default function Stage({
               <MessageSquareText size={18} />
             </button>
 
-            <div className="relative">
+            <div className="relative hidden sm:block">
               <button
                 className="player-btn w-auto px-1.5 text-[12px] font-semibold"
                 onClick={() => {
@@ -592,6 +719,7 @@ export default function Stage({
                       }`}
                       onClick={() => {
                         if (hlsRef.current) hlsRef.current.currentLevel = -1;
+                        localStorage.removeItem('bf-quality-height');
                         setLevel(-1);
                         setShowQuality(false);
                       }}
@@ -606,6 +734,7 @@ export default function Stage({
                         }`}
                         onClick={() => {
                           if (hlsRef.current) hlsRef.current.currentLevel = l.index;
+                          if (l.height) localStorage.setItem('bf-quality-height', String(l.height));
                           setLevel(l.index);
                           setShowQuality(false);
                         }}

@@ -1,7 +1,22 @@
-import { UA } from './config.js';
+import fs from 'node:fs';
+import path from 'node:path';
+import { CACHE_DIR, UA } from './config.js';
 
 const memory = new Map<string, { exp: number; value: unknown }>();
 const inflight = new Map<string, Promise<unknown>>();
+const MAX_CACHE_ENTRIES = 800;
+
+/** 防止长时间运行后内存缓存无限增长 */
+function remember(key: string, exp: number, value: unknown) {
+  memory.delete(key);
+  memory.set(key, { exp, value });
+  if (memory.size <= MAX_CACHE_ENTRIES) return;
+  const now = Date.now();
+  for (const [k, v] of memory) {
+    if (memory.size <= MAX_CACHE_ENTRIES) break;
+    if (v.exp <= now || k !== key) memory.delete(k);
+  }
+}
 
 export class HttpError extends Error {
   status: number;
@@ -60,12 +75,58 @@ export async function cached<T>(
   if (running) return running as Promise<T>;
   const p = loader()
     .then((value) => {
-      memory.set(key, { exp: Date.now() + ttl, value });
+      remember(key, Date.now() + ttl, value);
       return value;
     })
     .finally(() => inflight.delete(key));
   inflight.set(key, p);
   return p;
+}
+
+/** 带磁盘兜底的缓存：请求失败时返回上次成功结果（即使已过期） */
+export async function cachedPersistent<T>(
+  key: string,
+  ttl: number,
+  loader: () => Promise<T>,
+): Promise<T> {
+  const hit = memory.get(key);
+  if (hit && hit.exp > Date.now()) return hit.value as T;
+
+  try {
+    const value = await loader();
+    remember(key, Date.now() + ttl, value);
+    try {
+      const dir = path.join(CACHE_DIR, 'json');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `${key.replace(/[^a-zA-Z0-9._-]/g, '_')}.json`);
+      fs.writeFileSync(file, JSON.stringify({ at: Date.now(), value }), 'utf8');
+    } catch {
+      /* 磁盘写失败不影响请求 */
+    }
+    return value;
+  } catch (err) {
+    const stale = memory.get(key);
+    if (stale) {
+      console.warn(`[cache] ${key} 请求失败，使用内存旧数据`);
+      return stale.value as T;
+    }
+    try {
+      const file = path.join(
+        CACHE_DIR,
+        'json',
+        `${key.replace(/[^a-zA-Z0-9._-]/g, '_')}.json`,
+      );
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
+      if (parsed?.value !== undefined) {
+        memory.set(key, { exp: Date.now() + 5 * 60_000, value: parsed.value });
+        console.warn(`[cache] ${key} 请求失败，使用磁盘旧数据（${parsed.at ? new Date(parsed.at).toLocaleString('zh-CN') : '未知时间'}）`);
+        return parsed.value as T;
+      }
+    } catch {
+      /* 没旧数据 */
+    }
+    throw err;
+  }
 }
 
 export function cacheClear(prefix?: string) {

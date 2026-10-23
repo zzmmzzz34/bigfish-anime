@@ -73,11 +73,14 @@ async function main() {
   const byTitle = {};
   const bgmByAniList = {};
   const bgmByTitle = {};
+  const biliByAniList = {};
+  const biliByTitle = {};
   for (const item of items) {
     const zh = zhOf(item);
     const sites = item.sites || [];
     const ani = sites.find((s) => s.site === 'aniList')?.id;
     const bgm = sites.find((s) => s.site === 'bangumi')?.id;
+    const bili = sites.find((s) => s.site === 'bilibili')?.id;
     const en = (item.titleTranslate || {}).en || [];
     const keys = [item.title, ...en, ...(item.titleTranslate?.['zh-Hans'] || [])].filter(Boolean);
 
@@ -95,6 +98,13 @@ async function main() {
         if (k && !bgmByTitle[k]) bgmByTitle[k] = String(bgm);
       }
     }
+    if (bili) {
+      if (ani) biliByAniList[String(ani)] = String(bili);
+      for (const key of keys) {
+        const k = norm(key);
+        if (k && !biliByTitle[k]) biliByTitle[k] = String(bili);
+      }
+    }
   }
 
   fs.mkdirSync(SEED_DIR, { recursive: true });
@@ -107,15 +117,19 @@ async function main() {
       byTitle: Object.keys(byTitle).length,
       bgmByAniList: Object.keys(bgmByAniList).length,
       bgmByTitle: Object.keys(bgmByTitle).length,
+      biliByAniList: Object.keys(biliByAniList).length,
+      biliByTitle: Object.keys(biliByTitle).length,
     },
     byId,
     byTitle,
     bgmByAniList,
     bgmByTitle,
+    biliByAniList,
+    biliByTitle,
   };
   fs.writeFileSync(SEED_FILE, JSON.stringify(payload), 'utf8');
   console.log(
-    `\nseed: ${SEED_FILE}\nitems=${items.length} byId=${payload.counts.byId} byTitle=${payload.counts.byTitle} bgmId=${payload.counts.bgmByAniList} size=${(
+    `\nseed: ${SEED_FILE}\nitems=${items.length} byId=${payload.counts.byId} byTitle=${payload.counts.byTitle} bgmId=${payload.counts.bgmByAniList} biliId=${payload.counts.biliByAniList} size=${(
       fs.statSync(SEED_FILE).size / 1024
     ).toFixed(0)}KB`,
   );

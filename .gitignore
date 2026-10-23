@@ -3,6 +3,10 @@ dist
 data/db.json
 data/db.json.tmp
 data/cache
+data/backups
+data/dandan.db
+data/dandan.db-wal
+data/dandan.db-shm
 shots
 .edge-profile
 *.log

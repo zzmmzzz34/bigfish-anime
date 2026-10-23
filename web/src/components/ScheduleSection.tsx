@@ -28,7 +28,7 @@ export default function ScheduleSection({ days, limit = 8 }: Props) {
     key: `${item.id}:${item.episode}`,
     title: item.title,
     cover: item.cover,
-    href: catalogHref(`anilist-${item.id}`),
+    href: item.href || catalogHref(`anilist-${item.id}`),
     badge: item.episode ? `第 ${item.episode} 话` : undefined,
     score: item.score || undefined,
     meta: [item.timeText, item.popularityText].filter(Boolean).join(' · '),
@@ -40,7 +40,7 @@ export default function ScheduleSection({ days, limit = 8 }: Props) {
         <div>
           <h2 className="section-title">新番周报</h2>
           <p className="mt-1.5 pl-[14px] text-[12.5px] text-muted">
-            放送表来自 AniList · 时间为北京时间
+            放送表 · 北京时间
           </p>
         </div>
         <Link to="/schedule" className="flex items-center gap-0.5 text-[12.5px] text-white/40 hover:text-white">

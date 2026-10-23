@@ -53,6 +53,8 @@ export interface Source {
   createdAt?: number;
 }
 
+export type DanmakuSourceId = 'local' | 'bilibili' | 'dandan';
+
 export interface Danmaku {
   id: string;
   key: string;
@@ -61,6 +63,17 @@ export interface Danmaku {
   mode: 'scroll' | 'top' | 'bottom';
   time: number;
   createdAt: number;
+  source?: DanmakuSourceId;
+}
+
+export interface DanmakuMap {
+  /** 片源第 N 集 -> B站第 N+offset 集 */
+  biliOffset?: number;
+  /** 片源第 N 集 -> DanDan 第 N+offset 集 */
+  dandanOffset?: number;
+  /** 手动覆盖 B站 season_id */
+  biliSeasonId?: number;
+  updatedAt?: number;
 }
 
 export interface Comment {

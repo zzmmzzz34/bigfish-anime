@@ -12,3 +12,12 @@ createRoot(document.getElementById('root')!).render(
     </BrowserRouter>
   </StrictMode>,
 );
+
+// PWA：只在生产构建注册；手机通过 HTTPS 访问时才真正可用
+if ('serviceWorker' in navigator && import.meta.env.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {
+      /* http 局域网下注册会失败，不影响网页使用 */
+    });
+  });
+}

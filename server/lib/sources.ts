@@ -100,9 +100,10 @@ export async function searchAll(keyword: string) {
 }
 
 /** 换源：优先严格同名，其次允许极短的续名（如“国语版”已被归一化） */
-export async function alternates(title: string, excludeKey?: string) {
-  const { groups } = await searchAll(title);
-  const key = titleKey(title);
+export async function alternates(title: string, excludeKey?: string, alias = '') {
+  const query = alias.trim() || title;
+  const { groups } = await searchAll(query);
+  const key = titleKey(query);
   const all = groups.flatMap((g) => g.items);
   const block = /第二季|第三季|剧场|外传|解说|音乐会|ova|特别篇|总集篇|回忆|国语|粤语/i;
 
@@ -110,7 +111,7 @@ export async function alternates(title: string, excludeKey?: string) {
   const near: Work[] = [];
   for (const w of all) {
     if (w.key === excludeKey) continue;
-    if (/解说|预告|花絮|片段/i.test(w.title) && !/解说|预告|花絮|片段/i.test(title)) continue;
+    if (/解说|预告|花絮|片段/i.test(w.title) && !/解说|预告|花絮|片段/i.test(query)) continue;
     const k = titleKey(w.title);
     if (k === key) exact.push(w);
     else if (k.startsWith(key) && k.length - key.length <= 2 && !block.test(k.slice(key.length))) {

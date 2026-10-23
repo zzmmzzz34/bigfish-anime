@@ -8,6 +8,7 @@ import ScheduleSection from '../components/ScheduleSection';
 import type { PosterItem } from '../components/PosterCard';
 import { catalogHref, detailHref, formatTime, imgUrl } from '../lib/api';
 import { useApi, useTitle } from '../lib/hooks';
+import { groupHistory } from '../lib/library';
 import type { AniCard, BiliCard, DiscoverHome, HistoryItem, HomeRow, Work } from '../lib/types';
 
 function biliItem(c: BiliCard, badge?: string): PosterItem {
@@ -120,7 +121,8 @@ function FallbackHero({ work }: { work: Work }) {
 }
 
 function ContinueRow({ items }: { items: HistoryItem[] }) {
-  if (!items.length) return null;
+  const groups = groupHistory(items);
+  if (!groups.length) return null;
   return (
     <section>
       <div className="section-head">
@@ -133,11 +135,12 @@ function ContinueRow({ items }: { items: HistoryItem[] }) {
         </Link>
       </div>
       <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-4">
-        {items.slice(0, 4).map((h) => {
+        {groups.slice(0, 4).map((g) => {
+          const h = g.primary;
           const progress = h.duration ? Math.min(100, (h.position / h.duration) * 100) : 0;
           return (
             <Link
-              key={h.key}
+              key={g.key}
               to={`/play/${h.sourceId}/${h.vodId}/${h.lineIndex}/${h.episodeIndex}`}
               className="continue-card group"
             >
@@ -148,9 +151,10 @@ function ContinueRow({ items }: { items: HistoryItem[] }) {
                 </span>
               </div>
               <div className="min-w-0 flex-1">
-                <div className="clamp-1 text-[12.5px] font-medium">{h.title}</div>
+                <div className="clamp-1 text-[12.5px] font-medium">{g.title}</div>
                 <div className="mt-0.5 clamp-1 text-[11px] text-white/35">
                   {h.episodeName} · {formatTime(h.position)}
+                  {g.items.length > 1 ? ` · ${g.items.length} 个片源` : ''}
                 </div>
                 <div className="progress-line mt-2">
                   <span style={{ width: `${progress}%` }} />

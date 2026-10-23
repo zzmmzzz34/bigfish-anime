@@ -4,6 +4,7 @@ import {
   CalendarClock,
   CalendarDays,
   Fish,
+  Flame,
   Heart,
   House,
   Server,
@@ -15,6 +16,7 @@ const NAV = [
   { to: '/airing', label: '新番', icon: CalendarDays },
   { to: '/schedule', label: '放送', icon: CalendarClock },
   { to: '/ranking', label: '排行', icon: Trophy },
+  { to: '/memes', label: '热梗', icon: Flame },
   { to: '/library', label: '收藏', icon: Bookmark },
   { to: '/sources', label: '片源', icon: Server },
 ];

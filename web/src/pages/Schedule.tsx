@@ -7,7 +7,10 @@ import type { AniWeekDay } from '../lib/types';
 
 export default function Schedule() {
   useTitle('新番周报');
-  const { data, loading, error, reload } = useApi<{ days: AniWeekDay[] }>('/api/anilist/week');
+  const { data, loading, error, reload } = useApi<{
+    days: AniWeekDay[];
+    fallback?: 'bilibili' | 'bangumi';
+  }>('/api/anilist/week');
   const days = data?.days || [];
   const initial = days.find((d) => d.isToday)?.weekday || 1;
   const [active, setActive] = useState<number | null>(null);
@@ -17,7 +20,7 @@ export default function Schedule() {
     key: `${item.id}:${item.episode}`,
     title: item.title,
     cover: item.cover,
-    href: catalogHref(`anilist-${item.id}`),
+    href: item.href || catalogHref(`anilist-${item.id}`),
     badge: item.episode ? `第 ${item.episode} 话` : undefined,
     score: item.score || undefined,
     meta: [item.timeText, item.popularityText].filter(Boolean).join(' · '),
@@ -31,8 +34,13 @@ export default function Schedule() {
           新番周报
         </h1>
         <p className="mt-2 text-[13px] text-muted">
-          AniList 放送表 · 北京时间 · 本周（{days[0]?.date} 起）
+          放送表 · 北京时间 · 本周（{days[0]?.date} 起）
         </p>
+        {data?.fallback && (
+          <p className="mt-1 text-[11px] text-[#ffb3c0]">
+            AniList 暂时不可用，已切换到 {data.fallback === 'bangumi' ? 'Bangumi' : 'B站'} 放送表
+          </p>
+        )}
       </div>
 
       {loading && !data ? (

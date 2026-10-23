@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -7,14 +7,18 @@ import {
   ChevronUp,
   Layers,
   Loader2,
+  MessageCircle,
   Play,
   RefreshCw,
   Search,
   Star,
+  ThumbsUp,
   TriangleAlert,
+  X,
 } from 'lucide-react';
-import { imgUrl, prettyLine, searchHref } from '../lib/api';
+import { apiDelete, apiGet, apiPost, imgUrl, prettyLine, searchHref } from '../lib/api';
 import { useApi, useTitle } from '../lib/hooks';
+import { useToast } from '../components/Toast';
 import {
   healthLabel,
   recommendedIndex,
@@ -22,7 +26,23 @@ import {
   useAutoLine,
   useLineHealth,
 } from '../lib/lineHealth';
-import type { BiliCard, PlayLine, SourceMatch } from '../lib/types';
+import type {
+  BiliCard,
+  BiliCommunity,
+  ManualMatch,
+  PlayLine,
+  SearchGroup,
+  Source,
+  SourceMatch,
+  Work,
+} from '../lib/types';
+
+function fmtCount(n: number) {
+  if (!n) return '0';
+  if (n >= 100_000_000) return `${(n / 100_000_000).toFixed(1).replace(/\.0$/, '')} 亿`;
+  if (n >= 10_000) return `${(n / 10_000).toFixed(1).replace(/\.0$/, '')} 万`;
+  return n.toLocaleString('zh-CN');
+}
 
 interface CatalogLine extends PlayLine {
   sourceId: string;
@@ -44,6 +64,17 @@ export default function Catalog() {
   useTitle(work?.title);
 
   const [expanded, setExpanded] = useState(false);
+  const [discussionTab, setDiscussionTab] = useState<'short' | 'long'>('short');
+  const [aliasOpen, setAliasOpen] = useState(false);
+  const [alias, setAlias] = useState('');
+  const [aliasSaving, setAliasSaving] = useState(false);
+  const [manual, setManual] = useState<ManualMatch[]>([]);
+  const [bindSource, setBindSource] = useState('');
+  const [bindQ, setBindQ] = useState('');
+  const [bindItems, setBindItems] = useState<Work[]>([]);
+  const [bindBusy, setBindBusy] = useState(false);
+  const sourcesQ = useApi<Source[]>('/api/sources');
+  const toast = useToast();
 
   const lines = useMemo<CatalogLine[]>(() => {
     const matches = matchQ.data?.matches || [];
@@ -108,8 +139,123 @@ export default function Catalog() {
   const currentStat = current ? stats[current.healthKey] : undefined;
   const playable = current?.episodes.filter((e) => e.playable).length || 0;
   const firstEp = current?.episodes[0];
-  const catalogQuery =
-    work?.site === 'bilibili' ? `?catalog=${encodeURIComponent(work.id)}` : '';
+  const danmakuSeason =
+    work?.site === 'bilibili'
+      ? String(work.id)
+      : work?.biliSeasonId
+        ? String(work.biliSeasonId)
+        : '';
+  const catalogQuery = danmakuSeason ? `?catalog=${encodeURIComponent(danmakuSeason)}` : '';
+  const communityQ = useApi<BiliCommunity>(
+    danmakuSeason
+      ? `/api/bilibili/community?season=${encodeURIComponent(danmakuSeason)}`
+      : null,
+  );
+  const community = communityQ.data;
+  const shortReviews = community?.reviews || [];
+  const longReviews = community?.longReviews || [];
+
+  useEffect(() => {
+    if (!work?.title) return;
+    let alive = true;
+    setBindQ(work.title);
+    apiGet<{ alias: string }>(`/api/match/alias?title=${encodeURIComponent(work.title)}`)
+      .then((res) => {
+        if (alive) setAlias(res.alias || '');
+      })
+      .catch(() => {});
+    apiGet<{ items: ManualMatch[] }>(
+      `/api/manual-matches?title=${encodeURIComponent(work.title)}`,
+    )
+      .then((res) => {
+        if (alive) setManual(res.items || []);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [work?.title]);
+
+  useEffect(() => {
+    if (bindSource || !sourcesQ.data?.length) return;
+    const first = sourcesQ.data.find((s) => s.enabled) || sourcesQ.data[0];
+    if (first) setBindSource(first.id);
+  }, [bindSource, sourcesQ.data]);
+
+  const saveAlias = async (clear = false) => {
+    if (!work?.title) return;
+    setAliasSaving(true);
+    try {
+      const next = clear ? '' : alias.trim();
+      await apiPost('/api/match/alias', { title: work.title, alias: next });
+      setAlias(next);
+      setAliasOpen(false);
+      matchQ.reload();
+      toast(next ? '匹配修正已保存，正在重新匹配' : '已恢复默认标题匹配', 'success');
+    } catch (err: any) {
+      toast(err?.message || '保存失败', 'error');
+    } finally {
+      setAliasSaving(false);
+    }
+  };
+
+  const searchBinding = async () => {
+    if (!bindQ.trim()) return;
+    setBindBusy(true);
+    try {
+      const res = await apiGet<{ groups: SearchGroup[] }>(
+        `/api/search?q=${encodeURIComponent(bindQ.trim())}`,
+      );
+      const items = res.groups
+        .flatMap((g) => g.items)
+        .filter((w) => !bindSource || w.sourceId === bindSource)
+        .slice(0, 8);
+      setBindItems(items);
+      if (!items.length) toast('这个片源没搜到同名作品', 'info');
+    } catch (err: any) {
+      toast(err?.message || '搜索失败', 'error');
+    } finally {
+      setBindBusy(false);
+    }
+  };
+
+  const addBinding = async (w: Work) => {
+    if (!work?.title) return;
+    setBindBusy(true);
+    try {
+      const res = await apiPost<{ items: ManualMatch[] }>('/api/manual-matches', {
+        title: work.title,
+        sourceId: w.sourceId,
+        vodId: w.vodId,
+      });
+      setManual(res.items || []);
+      setBindItems([]);
+      matchQ.reload();
+      toast(`已绑定 ${w.sourceName}，正在重新匹配`, 'success');
+    } catch (err: any) {
+      toast(err?.message || '绑定失败', 'error');
+    } finally {
+      setBindBusy(false);
+    }
+  };
+
+  const removeBinding = async (m: ManualMatch) => {
+    if (!work?.title) return;
+    setBindBusy(true);
+    try {
+      const res = await apiDelete<{ items: ManualMatch[] }>(
+        `/api/manual-matches?title=${encodeURIComponent(work.title)}&sourceId=${encodeURIComponent(m.sourceId)}&vodId=${encodeURIComponent(m.vodId)}`,
+      );
+      setManual(res.items || []);
+      matchQ.reload();
+      toast('已移除手动绑定', 'success');
+    } catch (err: any) {
+      toast(err?.message || '移除失败', 'error');
+    } finally {
+      setBindBusy(false);
+    }
+  };
+
   const epHref = (index: number) =>
     `/play/${encodeURIComponent(current?.sourceId || '')}/${encodeURIComponent(current?.vodId || '')}/${current?.lineIndex ?? 0}/${index}${catalogQuery}`;
 
@@ -184,7 +330,12 @@ export default function Catalog() {
                 rel="noreferrer"
                 className="btn mt-2 w-full text-[12.5px]"
               >
-                <ArrowUpRight size={14} /> {work.site === 'anilist' ? 'AniList 页面' : 'B站页面'}
+                <ArrowUpRight size={14} />{' '}
+                {work.site === 'anilist'
+                  ? 'AniList 页面'
+                  : work.site === 'bangumi'
+                    ? 'Bangumi 页面'
+                    : 'B站页面'}
               </a>
             </div>
           </div>
@@ -235,6 +386,9 @@ export default function Catalog() {
               ) : null}
               {work.year && <span className="chip chip-accent">{work.year}</span>}
               {work.area && <span className="chip">{work.area}</span>}
+              {work.site === 'bangumi' && work.episodesText && (
+                <span className="chip">{work.episodesText}</span>
+              )}
               {work.status && <span className="chip">{work.status}</span>}
             </div>
 
@@ -245,6 +399,31 @@ export default function Catalog() {
                 </span>
               ))}
             </div>
+
+            {community && (
+              <div className="mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {[
+                  [
+                    'B站追番',
+                    community.stat.followText.replace(/系列追番|追番/g, '').trim() ||
+                      fmtCount(community.stat.favorites),
+                  ],
+                  ['播放', fmtCount(community.stat.views)],
+                  ['弹幕', fmtCount(community.stat.danmakus)],
+                  ['讨论', fmtCount(community.stat.reply)],
+                ].map(([label, value]) => (
+                  <div
+                    key={label}
+                    className="rounded-xl border border-white/[0.06] bg-white/[0.025] px-3 py-2"
+                  >
+                    <div className="text-[10.5px] text-white/35">{label}</div>
+                    <div className="mt-0.5 text-[14px] font-semibold tabular-nums text-white/80">
+                      {value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="mt-5 space-y-2 text-[13px] leading-relaxed text-white/55">
               {work.studio && (
@@ -323,6 +502,12 @@ export default function Catalog() {
                       <RefreshCw size={12} className={busy ? 'animate-spin' : ''} />
                     </button>
                   )}
+                  <button
+                    className="text-[11px] text-white/35 hover:text-white"
+                    onClick={() => setAliasOpen((v) => !v)}
+                  >
+                    匹配修正
+                  </button>
                 </div>
                 {current && (
                   <div className="flex flex-wrap gap-1.5">
@@ -347,6 +532,123 @@ export default function Catalog() {
                   </div>
                 )}
               </div>
+
+              {aliasOpen && (
+                <div className="mb-4 rounded-xl border border-white/10 bg-white/[0.025] p-3">
+                  <div className="text-[12.5px] font-medium text-white/75">匹配修正</div>
+                  <p className="mt-1 text-[11px] leading-5 text-white/30">
+                    片源标题和本站不一致时，填片源那边的实际标题；保存后重新搜索线路。
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <input
+                      className="field h-8 min-w-0 flex-1 px-2 text-[12px]"
+                      value={alias}
+                      onChange={(e) => setAlias(e.target.value)}
+                      placeholder={work.title}
+                      maxLength={80}
+                    />
+                    <button
+                      className="btn h-8 px-3 text-[11.5px]"
+                      onClick={() => saveAlias(false)}
+                      disabled={aliasSaving}
+                    >
+                      {aliasSaving ? '保存中…' : '保存'}
+                    </button>
+                    <button
+                      className="btn h-8 px-3 text-[11.5px]"
+                      onClick={() => saveAlias(true)}
+                      disabled={aliasSaving}
+                    >
+                      恢复默认
+                    </button>
+                  </div>
+
+                  <div className="mt-3 border-t border-white/[0.07] pt-3">
+                    <div className="text-[12px] font-medium text-white/70">手动绑定片源</div>
+                    <p className="mt-1 text-[11px] leading-5 text-white/30">
+                      标题完全不同、搜索也搜不到时，直接从某个片源里挑作品绑到当前番剧。
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <select
+                        className="field h-8 w-[132px] px-2 text-[12px]"
+                        value={bindSource}
+                        onChange={(e) => setBindSource(e.target.value)}
+                      >
+                        {(sourcesQ.data || [])
+                          .filter((s) => s.enabled)
+                          .map((s) => (
+                            <option key={s.id} value={s.id}>
+                              {s.name}
+                            </option>
+                          ))}
+                      </select>
+                      <input
+                        className="field h-8 min-w-0 flex-1 px-2 text-[12px]"
+                        value={bindQ}
+                        onChange={(e) => setBindQ(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.preventDefault();
+                            searchBinding();
+                          }
+                        }}
+                        placeholder="片源里的标题"
+                      />
+                      <button
+                        className="btn h-8 px-3 text-[11.5px]"
+                        onClick={searchBinding}
+                        disabled={bindBusy}
+                      >
+                        {bindBusy ? '搜索中…' : '搜索'}
+                      </button>
+                    </div>
+
+                    {bindItems.length > 0 && (
+                      <div className="mt-2 space-y-1.5">
+                        {bindItems.map((w) => (
+                          <button
+                            key={w.key}
+                            className="flex w-full items-center gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-2 py-1.5 text-left hover:border-white/20"
+                            onClick={() => addBinding(w)}
+                            disabled={bindBusy}
+                          >
+                            <img
+                              src={imgUrl(w.cover)}
+                              alt=""
+                              className="h-9 w-6 rounded object-cover"
+                              loading="lazy"
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="block clamp-1 text-[11.5px] text-white/70">{w.title}</span>
+                              <span className="block text-[10px] text-white/30">
+                                {w.sourceName} {w.year ? `· ${w.year}` : ''}
+                              </span>
+                            </span>
+                            <span className="shrink-0 text-[10.5px] text-[#ff97a8]">绑定</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {manual.length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {manual.map((m) => (
+                          <button
+                            key={`${m.sourceId}:${m.vodId}`}
+                            className="inline-flex items-center gap-1 rounded-md border border-[#ff4d6d]/25 bg-[#ff4d6d]/[0.06] px-1.5 py-1 text-[10px] text-white/60 hover:text-white"
+                            onClick={() => removeBinding(m)}
+                            disabled={bindBusy}
+                            title="点击移除绑定"
+                          >
+                            {m.sourceName} · {m.title}
+                            <X size={10} />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
 
               {matchQ.loading && !matchQ.data ? (
                 <div className="flex items-center gap-2 py-8 text-[12.5px] text-white/40">
@@ -441,13 +743,148 @@ export default function Catalog() {
               </div>
             ) : null}
 
+            {community && (shortReviews.length > 0 || longReviews.length > 0) ? (
+              <div className="mt-8">
+                <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-[14px] font-semibold">
+                    <MessageCircle size={15} className="text-[#ff8a9d]" />
+                    B站讨论
+                    <div className="ml-1 flex rounded-lg border border-white/10 p-0.5">
+                      <button
+                        className={`rounded-md px-2 py-0.5 text-[11px] font-normal transition-colors ${
+                          discussionTab === 'short'
+                            ? 'bg-white/10 text-white/85'
+                            : 'text-white/35 hover:text-white/70'
+                        }`}
+                        onClick={() => setDiscussionTab('short')}
+                      >
+                        热评 {shortReviews.length}
+                      </button>
+                      <button
+                        className={`rounded-md px-2 py-0.5 text-[11px] font-normal transition-colors ${
+                          discussionTab === 'long'
+                            ? 'bg-white/10 text-white/85'
+                            : 'text-white/35 hover:text-white/70'
+                        }`}
+                        onClick={() => setDiscussionTab('long')}
+                      >
+                        长评 {longReviews.length}
+                      </button>
+                    </div>
+                  </div>
+                  <a
+                    href={`https://www.bilibili.com/bangumi/media/md${community.mediaId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-0.5 text-[11.5px] text-white/35 hover:text-white"
+                  >
+                    去 B站 <ArrowUpRight size={12} />
+                  </a>
+                </div>
+
+                {discussionTab === 'short' ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {shortReviews.map((r) => (
+                      <a
+                        key={r.id || r.content}
+                        href={r.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 transition-colors hover:border-white/15 hover:bg-white/[0.04]"
+                      >
+                        <div className="flex items-center gap-2">
+                          {r.avatar ? (
+                            <img
+                              src={imgUrl(r.avatar)}
+                              alt=""
+                              className="h-6 w-6 rounded-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="h-6 w-6 rounded-full bg-white/10" />
+                          )}
+                          <span className="min-w-0 flex-1 truncate text-[11.5px] text-white/55">
+                            {r.user}
+                          </span>
+                          {r.score > 0 && (
+                            <span className="shrink-0 text-[11px] font-semibold text-[#ffd166]">
+                              {r.score}
+                            </span>
+                          )}
+                        </div>
+                        <p className="clamp-4 mt-2 text-[12px] leading-5 text-white/65">{r.content}</p>
+                        <div className="mt-2 flex items-center gap-3 text-[10.5px] text-white/25">
+                          <span className="flex items-center gap-1">
+                            <ThumbsUp size={11} /> {r.likes}
+                          </span>
+                          {r.date && <span>{r.date}</span>}
+                          <span className="ml-auto">B站热评 ↗</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                ) : longReviews.length ? (
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {longReviews.map((r) => (
+                      <a
+                        key={r.id}
+                        href={r.link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-3 transition-colors hover:border-white/15 hover:bg-white/[0.04]"
+                      >
+                        <div className="flex items-center gap-2">
+                          {r.avatar ? (
+                            <img
+                              src={imgUrl(r.avatar)}
+                              alt=""
+                              className="h-6 w-6 rounded-full object-cover"
+                              loading="lazy"
+                            />
+                          ) : (
+                            <div className="h-6 w-6 rounded-full bg-white/10" />
+                          )}
+                          <span className="min-w-0 flex-1 truncate text-[11.5px] text-white/55">
+                            {r.user}
+                          </span>
+                          {r.spoiler && (
+                            <span className="shrink-0 rounded bg-amber-400/10 px-1.5 py-0.5 text-[9.5px] text-amber-300/80">
+                              含剧透
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="clamp-2 mt-2 text-[12.5px] font-semibold leading-5 text-white/80">
+                          {r.title}
+                        </h3>
+                        <p className="clamp-3 mt-1 text-[11.5px] leading-5 text-white/50">{r.content}</p>
+                        <div className="mt-2 flex items-center gap-3 text-[10.5px] text-white/25">
+                          <span className="flex items-center gap-1">
+                            <ThumbsUp size={11} /> {r.likes}
+                          </span>
+                          <span>{r.replies} 评论</span>
+                          {r.date && <span>{r.date}</span>}
+                          <span className="ml-auto">阅读长评 ↗</span>
+                        </div>
+                      </a>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-dashed border-white/10 px-4 py-6 text-center text-[12px] text-white/30">
+                    这部番暂时没有 B站长评，看看热评或去 B站讨论。
+                  </div>
+                )}
+              </div>
+            ) : null}
+
             <div className="mt-6 text-[11.5px] text-white/25">
               元数据与评分来自{' '}
               {work.scoreSource === 'bangumi'
                 ? 'Bangumi（中文标题由 bangumi-data 映射）'
                 : work.site === 'anilist'
                   ? 'AniList（中文标题由 bangumi-data 映射）'
-                  : 'B 站番剧'}
+                  : work.site === 'bangumi'
+                    ? 'Bangumi'
+                    : 'B 站番剧'}
               ；播放线路来自本地配置的片源，两者独立。
               {work.link && (
                 <a href={work.link} target="_blank" rel="noreferrer" className="ml-1 text-white/40 hover:text-white">

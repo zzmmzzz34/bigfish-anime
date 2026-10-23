@@ -1,4 +1,5 @@
 import { BANGUMI_BASE, UA } from './config.js';
+import { cachedPersistent } from './http.js';
 import { titleKey } from './util.js';
 import { bangumiIdFor } from './anilistZh.js';
 import {
@@ -164,6 +165,23 @@ export async function fetchBangumiSubject(id: number): Promise<BangumiInfo> {
 }
 
 /** 抓取并缓存集数；返回集数 */
+/** 按 Bangumi ID 读取详情：优先新鲜缓存，过期回源，失败用旧缓存 */
+export async function getBangumiSubject(id: number): Promise<BangumiInfo | null> {
+  if (!id) return null;
+  const row = subjectGet(id);
+  const age = row ? Date.now() - row.fetched_at : Number.POSITIVE_INFINITY;
+  if (row && age < FRESH_MS) return fromRow(row, false);
+  if (!bangumiEnabled()) return row ? fromRow(row, true) : null;
+  if (Date.now() < cooldownUntil) return row ? fromRow(row, true) : null;
+  try {
+    return await fetchBangumiSubject(id);
+  } catch (err: any) {
+    console.warn('[bangumi] subject failed:', err?.message || err);
+    cooldownUntil = Date.now() + 5 * 60_000;
+    return row ? fromRow(row, true) : null;
+  }
+}
+
 export async function fetchBangumiEpisodes(id: number): Promise<number> {
   if (!bangumiEnabled()) return 0;
   const all: any[] = [];
@@ -244,6 +262,15 @@ export async function enrichBangumi(
     cooldownUntil = Date.now() + 5 * 60_000;
     return row ? fromRow(row, true) : null;
   }
+}
+
+/** Bangumi 每日放送，作为 AniList 周表不可用时的兜底 */
+export async function getBangumiCalendar(): Promise<any[]> {
+  if (!bangumiEnabled()) return [];
+  return cachedPersistent('bangumi:calendar', 6 * 3600_000, async () => {
+    const data = await bgmJson('/calendar');
+    return Array.isArray(data) ? data : [];
+  });
 }
 
 export async function checkBangumi() {

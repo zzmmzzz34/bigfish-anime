@@ -1,4 +1,11 @@
-import { getAiring, getIndex, getSeason, type BiliCard, type BiliSeason } from './bilibili.js';
+import {
+  findSeasonByTitle,
+  getAiring,
+  getIndex,
+  getSeason,
+  type BiliCard,
+  type BiliSeason,
+} from './bilibili.js';
 import {
   getAniListWork,
   getSeasonAnime,
@@ -8,6 +15,10 @@ import {
   type AniWeekDay,
 } from './anilist.js';
 import { buildHome, detailSource, getSource, searchAll } from './sources.js';
+import { getScheduleFallback } from './scheduleFallback.js';
+import { getBangumiSubject } from './bangumi.js';
+import { manualList } from './manualMatches.js';
+import { biliSeasonForAniList } from './bilibiliDanmaku.js';
 import { titleKey } from './util.js';
 import type { PlayLine, Work } from './types.js';
 
@@ -105,7 +116,11 @@ export async function homeDiscover(): Promise<DiscoverHome> {
   const airing = airingR.status === 'fulfilled' ? airingR.value : [];
   const anilistAiring = aniAirR.status === 'fulfilled' ? aniAirR.value : [];
   const anilistTop = aniTopR.status === 'fulfilled' ? aniTopR.value : [];
-  const anilistWeek = aniWeekR.status === 'fulfilled' ? aniWeekR.value : [];
+  let anilistWeek = aniWeekR.status === 'fulfilled' ? aniWeekR.value : [];
+  if (!anilistWeek.length) {
+    const fb = await getScheduleFallback().catch(() => null);
+    anilistWeek = fb?.days || [];
+  }
   const latest =
     homeR.status === 'fulfilled'
       ? homeR.value.rows.find((r) => r.id === 'latest')?.items || homeR.value.rows[0]?.items || []
@@ -134,8 +149,58 @@ export async function homeDiscover(): Promise<DiscoverHome> {
   };
 }
 
+async function getBangumiCatalogWork(rawId: string) {
+  const id = Number(rawId);
+  if (!Number.isFinite(id) || id <= 0) throw new Error('无效的 Bangumi ID');
+  const subject = await getBangumiSubject(id);
+  if (!subject) throw new Error('Bangumi 条目不存在或暂时不可用');
+  const title = subject.nameCn || subject.name;
+  const year = String(subject.date || '').slice(0, 4);
+  const cover = String(subject.images?.large || subject.images?.common || '');
+  let biliSeasonId = await biliSeasonForAniList(undefined, [title]).catch(() => 0);
+  if (!biliSeasonId) {
+    biliSeasonId = await findSeasonByTitle(title).catch(() => 0);
+  }
+  return {
+    id: `bgm-${subject.id}`,
+    site: 'bangumi' as const,
+    title,
+    cover,
+    score: subject.score,
+    scoreText: subject.score ? String(subject.score) : '',
+    orderText: '',
+    episodesText: subject.eps ? `全 ${subject.eps} 话` : '',
+    isFinish: false,
+    badge: 'Bangumi',
+    link: `https://bgm.tv/subject/${subject.id}`,
+    year,
+    area: subject.platform || '',
+    genres: subject.tags.slice(0, 8),
+    synopsis: subject.summary,
+    synopsisLang: 'zh' as const,
+    total: subject.eps,
+    ratingCount: subject.ratingTotal,
+    scoreSource: 'bangumi' as const,
+    bangumiId: subject.id,
+    bangumiRank: subject.rank,
+    bangumiRatingTotal: 0,
+    bangumiCachedAt: subject.fetchedAt,
+    bangumiStale: subject.stale,
+    biliSeasonId: biliSeasonId || undefined,
+    status: '',
+    subtitle: '',
+    seasonTitle: title,
+    episodes: [],
+    studio: '',
+    yearText: year,
+  };
+}
+
 export async function getCatalogWork(id: string): Promise<any> {
   if (id.startsWith('anilist-')) return getAniListWork(id.slice('anilist-'.length));
+  if (id.startsWith('bgm-') || id.startsWith('bangumi-')) {
+    return getBangumiCatalogWork(id.replace(/^(bgm-|bangumi-)/, ''));
+  }
   const s = await getSeason(id);
   return { ...s, studio: parseStudio(s.staff), yearText: s.year || '' };
 }
@@ -181,11 +246,12 @@ function strictMatch(candidate: string, target: string) {
   return false;
 }
 
-export async function matchSourceWorks(title: string): Promise<SourceMatch[]> {
+export async function matchSourceWorks(title: string, alias = ''): Promise<SourceMatch[]> {
+  const query = alias.trim() || title;
   const queries = [
-    title,
-    title.replace(/\s*第\s*[0-9一二三四五六七八九十]+\s*[季期部]/g, '').trim(),
-    title.replace(/[（(].*?[)）]/g, '').trim(),
+    query,
+    query.replace(/\s*第\s*[0-9一二三四五六七八九十]+\s*[季期部]/g, '').trim(),
+    query.replace(/[（(].*?[)）]/g, '').trim(),
   ].filter((v, i, arr) => v && arr.indexOf(v) === i);
 
   const pool: Work[] = [];
@@ -193,7 +259,7 @@ export async function matchSourceWorks(title: string): Promise<SourceMatch[]> {
     try {
       const res = await searchAll(q);
       for (const g of res.groups) {
-        if (scoreTitle(g.title, title) < 45) continue;
+        if (scoreTitle(g.title, query) < 45) continue;
         pool.push(...g.items);
       }
     } catch {
@@ -202,9 +268,9 @@ export async function matchSourceWorks(title: string): Promise<SourceMatch[]> {
     if (pool.length > 0) break;
   }
 
-  const targetLen = normTitle(title).length;
+  const targetLen = normTitle(query).length;
   const candidates = pool
-    .filter((w) => strictMatch(w.title, title))
+    .filter((w) => strictMatch(w.title, query))
     .filter((w, i, arr) => arr.findIndex((x) => x.key === w.key) === i)
     .sort(
       (a, b) =>
@@ -244,5 +310,36 @@ export async function matchSourceWorks(title: string): Promise<SourceMatch[]> {
       /* ignore */
     }
   }
-  return matches;
+
+  const manual: SourceMatch[] = [];
+  const seen = new Set(matches.map((m) => `${m.sourceId}:${m.vodId}`));
+  for (const binding of manualList(title)) {
+    const key = `${binding.sourceId}:${binding.vodId}`;
+    if (seen.has(key)) continue;
+    const source = getSource(binding.sourceId);
+    if (!source) continue;
+    try {
+      const d = await detailSource(source, binding.vodId);
+      if (!d) continue;
+      const lines = (d.lines || [])
+        .map((l, i) => ({ ...l, lineIndex: i }))
+        .filter((l) => l.episodes.length > 0);
+      if (!lines.length) continue;
+      seen.add(key);
+      manual.push({
+        sourceId: binding.sourceId,
+        sourceName: binding.sourceName || source.name,
+        vodId: binding.vodId,
+        title: d.title || binding.title,
+        cover: d.cover || binding.cover,
+        year: d.year || binding.year,
+        remarks: d.remarks || binding.remarks,
+        score: 0,
+        lines,
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+  return [...manual, ...matches];
 }

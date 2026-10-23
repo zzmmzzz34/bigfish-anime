@@ -1,18 +1,37 @@
-import { useEffect } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Route, Routes, useLocation } from 'react-router-dom';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
+import AuthGate from './components/AuthGate';
+import ErrorBoundary from './components/ErrorBoundary';
 import { ToastProvider } from './components/Toast';
-import Home from './pages/Home';
-import SearchPage from './pages/Search';
-import Detail from './pages/Detail';
-import Catalog from './pages/Catalog';
-import Player from './pages/Player';
-import Library from './pages/Library';
-import Sources from './pages/Sources';
-import Airing from './pages/Airing';
-import Schedule from './pages/Schedule';
-import Ranking from './pages/Ranking';
+
+// 路由拆包：播放器（含 hls.js）只在进播放页时加载，首页不再背整个播放器
+const Home = lazy(() => import('./pages/Home'));
+const SearchPage = lazy(() => import('./pages/Search'));
+const Detail = lazy(() => import('./pages/Detail'));
+const Catalog = lazy(() => import('./pages/Catalog'));
+const Player = lazy(() => import('./pages/Player'));
+const Library = lazy(() => import('./pages/Library'));
+const Sources = lazy(() => import('./pages/Sources'));
+const Airing = lazy(() => import('./pages/Airing'));
+const Schedule = lazy(() => import('./pages/Schedule'));
+const Ranking = lazy(() => import('./pages/Ranking'));
+const Memes = lazy(() => import('./pages/Memes'));
+
+function PageFallback() {
+  return (
+    <div className="container-page py-10" aria-busy="true">
+      <div className="skeleton h-8 w-1/3 rounded-lg" />
+      <div className="skeleton mt-5 aspect-video rounded-2xl" />
+      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+        <div className="skeleton h-28 rounded-xl" />
+        <div className="skeleton h-28 rounded-xl" />
+        <div className="skeleton h-28 rounded-xl" />
+      </div>
+    </div>
+  );
+}
 
 function ScrollTop() {
   const { pathname, search } = useLocation();
@@ -24,8 +43,10 @@ function ScrollTop() {
 
 export default function App() {
   return (
-    <ToastProvider>
-      <div className="app-shell">
+    <ErrorBoundary>
+      <ToastProvider>
+        <AuthGate>
+          <div className="app-shell">
         <div
           className="pointer-events-none fixed inset-0 z-0"
           style={{
@@ -39,11 +60,13 @@ export default function App() {
         <div className="app-body">
           <Header />
           <main className="relative z-10">
-            <Routes>
+            <Suspense fallback={<PageFallback />}>
+              <Routes>
               <Route path="/" element={<Home />} />
               <Route path="/airing" element={<Airing />} />
               <Route path="/schedule" element={<Schedule />} />
               <Route path="/ranking" element={<Ranking />} />
+              <Route path="/memes" element={<Memes />} />
               <Route path="/search" element={<SearchPage />} />
               <Route path="/catalog/:id" element={<Catalog />} />
               <Route path="/detail/:sourceId/:vodId" element={<Detail />} />
@@ -51,7 +74,8 @@ export default function App() {
               <Route path="/library" element={<Library />} />
               <Route path="/sources" element={<Sources />} />
               <Route path="*" element={<Home />} />
-            </Routes>
+              </Routes>
+            </Suspense>
           </main>
           <footer className="relative z-10 mt-20 border-t border-white/[0.06] py-9">
             <div className="container-page flex flex-col items-start justify-between gap-3 text-[12px] text-white/30 sm:flex-row sm:items-center">
@@ -66,7 +90,9 @@ export default function App() {
             </div>
           </footer>
         </div>
-      </div>
-    </ToastProvider>
+          </div>
+        </AuthGate>
+      </ToastProvider>
+    </ErrorBoundary>
   );
 }

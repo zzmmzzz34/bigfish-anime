@@ -1,9 +1,28 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './config.js';
-import type { Comment, Danmaku, FavoriteItem, HistoryItem, LineStat, Source } from './types.js';
+import type {
+  Comment,
+  Danmaku,
+  DanmakuMap,
+  FavoriteItem,
+  HistoryItem,
+  LineStat,
+  Source,
+} from './types.js';
 
 const DB_FILE = path.join(DATA_DIR, 'db.json');
+
+export interface ManualMatch {
+  sourceId: string;
+  sourceName: string;
+  vodId: string;
+  title: string;
+  cover: string;
+  year: string;
+  remarks: string;
+  createdAt: number;
+}
 
 export interface Database {
   sources: Source[];
@@ -12,6 +31,9 @@ export interface Database {
   danmaku: Record<string, Danmaku[]>;
   comments: Record<string, Comment[]>;
   lineStats: Record<string, LineStat>;
+  danmakuMap: Record<string, DanmakuMap>;
+  matchAlias: Record<string, string>;
+  manualMatches: Record<string, ManualMatch[]>;
   settings: {
     danmakuEnabled: boolean;
     danmakuOpacity: number;
@@ -45,6 +67,9 @@ function emptyDb(): Database {
     danmaku: {},
     comments: {},
     lineStats: {},
+    danmakuMap: {},
+    matchAlias: {},
+    manualMatches: {},
     settings: { danmakuEnabled: true, danmakuOpacity: 0.9 },
   };
 }
@@ -61,6 +86,9 @@ export function getDb(): Database {
       ...emptyDb(),
       ...parsed,
       lineStats: parsed.lineStats || {},
+      danmakuMap: parsed.danmakuMap || {},
+      matchAlias: parsed.matchAlias || {},
+      manualMatches: parsed.manualMatches || {},
       settings: { ...emptyDb().settings, ...(parsed.settings || {}) },
     };
     // 合并内置源（用户可删除，删除后 id 会记录在 removedSources）

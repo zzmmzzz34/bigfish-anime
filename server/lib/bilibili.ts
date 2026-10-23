@@ -1,5 +1,6 @@
 import { cached, request, HttpError } from './http.js';
 import { UA } from './config.js';
+import { titleKey } from './util.js';
 
 const API = 'https://api.bilibili.com';
 const HEADERS = {
@@ -9,7 +10,7 @@ const HEADERS = {
   Accept: 'application/json, text/plain, */*',
 };
 
-async function bili<T = any>(path: string, timeout = 15_000): Promise<T> {
+export async function bili<T = any>(path: string, timeout = 15_000): Promise<T> {
   const res = await request(API + path, { headers: HEADERS }, timeout);
   if (!res.ok) throw new HttpError(`B站接口返回 ${res.status}`, 502);
   const json: any = await res.json();
@@ -23,6 +24,50 @@ function fixUrl(url: string) {
   if (raw.startsWith('//')) return `https:${raw}`;
   if (raw.startsWith('http://')) return `https://${raw.slice(7)}`;
   return raw;
+}
+
+const CN_SEASON: Record<string, string> = {
+  一: '1',
+  二: '2',
+  三: '3',
+  四: '4',
+  五: '5',
+  六: '6',
+  七: '7',
+  八: '8',
+  九: '9',
+  十: '10',
+};
+
+function seasonMarker(title: string) {
+  const s = String(title || '');
+  const m =
+    s.match(/第\s*([一二三四五六七八九十\d]+)\s*[季期部]/) ||
+    s.match(/Season\s*(\d+)/i) ||
+    s.match(/\bS(\d+)\b/i);
+  return m ? CN_SEASON[m[1]] || m[1] : '';
+}
+
+const BILI_DUB = /中配|中文配音|国语|粤语|台配|日语版/i;
+
+/** 按标题搜 B站番剧；仅返回标题与季数都匹配的 season_id，避免乱映射 */
+export async function findSeasonByTitle(title: string): Promise<number> {
+  const key = titleKey(title);
+  if (!key) return 0;
+  const wantedSeason = seasonMarker(title);
+  const targetDub = BILI_DUB.test(title);
+  return cached(`bili:title-season:${key}:${wantedSeason}:${targetDub}`, 7 * 24 * 3600_000, async () => {
+    const url =
+      `/x/web-interface/search/type?search_type=media_bangumi&keyword=${encodeURIComponent(title)}`;
+    const data: any = await bili(url);
+    const list = Array.isArray(data?.result) ? data.result : [];
+    const hit = list.find((item: any) => {
+      const name = String(item?.title || '').replace(/<[^>]+>/g, '');
+      if (!targetDub && BILI_DUB.test(name)) return false;
+      return titleKey(name) === key && seasonMarker(name) === wantedSeason;
+    });
+    return Number(hit?.season_id) || 0;
+  });
 }
 
 export interface BiliCard {

@@ -21,6 +21,10 @@ export default function Ranking() {
 
   const items = data?.items || [];
   const meta = TABS.find((t) => t.key === type)!;
+  const friendlyError =
+    error && /403|temporarily disabled/i.test(error)
+      ? 'AniList 暂时不可用（官方 API 停摆），可以先看 B站榜单。'
+      : error;
 
   const posters: PosterItem[] = items.map((c, i) => {
     if ('popularityText' in c) {
@@ -76,10 +80,17 @@ export default function Ranking() {
         </div>
       ) : error && !data ? (
         <div className="empty">
-          <div className="text-[14px] text-white/60">{error}</div>
-          <button className="btn" onClick={reload}>
-            重试
-          </button>
+          <div className="text-[14px] text-white/60">{friendlyError}</div>
+          <div className="flex gap-2">
+            <button className="btn" onClick={reload}>
+              重试
+            </button>
+            {type === 'anilist' && (
+              <button className="btn" onClick={() => setType('follow')}>
+                查看 B站追番
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">

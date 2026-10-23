@@ -100,6 +100,26 @@ v0.1 是「多源搜索 + 播放器」，v0.2 重做首页与线路，v0.3 补�
 - [x] **强制重检**：标题旁刷新按钮，跳过 10 分钟缓存
 - [x] 每条线路标注来源片源、集数、可直连集数
 - [x] 线路切换、选集、换源、片源详情互跳
+- [x] 播放器内直接跨源/跨线路切换，保持当前集数并续播
+- [x] 当前线路播放失败时自动尝试同集的其他线路/片源（每页最多一次，避免死循环）
+- [x] 详情页 B站热度（追番/播放/弹幕/讨论）+ B站短评讨论，接口失败时整块隐藏
+- [x] 换源面板打开即自动检测所有线路：绿/黄/红点、延迟、成功率、手动重检；自动换源跳过已死线路
+- [x] 桌面快捷键：空格播放/暂停、←/→ 10 秒、↑/↓ 音量、M 静音、F 全屏、D 弹幕、N 下一集；输入框/按钮聚焦时不误触
+- [x] 弹幕来源开关：本地/B站/DanDan 单独显示或隐藏，支持「仅本地」，偏好保存在浏览器
+- [x] 弹幕屏蔽词：输入即过滤，保存本地，支持移除/清空；在设置面板内实时显示屏蔽条数
+- [x] B站讨论分成「热评 / 长评」两栏：热评显示评分，长评显示标题/摘要/含剧透标记/评论数
+- [x] 路由级拆包：首页主包约 282KB，播放器（含 hls.js）约 624KB 只在进播放页时加载
+- [x] B站热梗聚合页 `/memes`：自动匹配约 12 部热门番，抓最新一集 B站热评，按番剧聚合
+- [x] 新番页始终合并 Bangumi 日历补充；Netflix/非 B站新番（如赛博朋克）也能出现
+- [x] Bangumi 独有条目也有详情页：封面、简介、评分、集数、Bangumi 外链，并自动匹配片源
+- [x] Bangumi → B站映射：seed 优先，B站标题搜索兜底；匹配不到只影响 B站弹幕/讨论，不影响详情
+- [x] 片名别名修正：详情页「匹配修正」保存片源实际标题，重新匹配线路；存 `db.matchAlias`
+- [x] 片源级手动绑定：在详情页搜某个片源的作品，直接绑定到当前番剧；存 `db.manualMatches`，播放器换源也生效
+- [x] 收藏/历史跨源合并：同一作品多片源折成一张卡，删除时整组删除
+- [x] HLS 画质选择 + 记忆：自动/各档位；选择后按高度记住，切集/切源继续使用
+- [x] Bangumi seed 自动同步：每 6 小时检查、超过 7 天后台跑 `sync-bangumi.mjs`，文件变化自动重载
+- [x] 弹幕源优先级：合并 / B站优先 / DanDan 优先 / 仅本地；优先模式主源为空才请求备用源
+- [x] 稳定性：内存缓存 800 条上限、SQLite WAL 自动 checkpoint、React 错误边界
 - [x] HLS / MP4，服务端代理解决 CORS、Referer、混合内容
 - [x] 非直链播放页自动嗅探 m3u8 / mp4
 - [x] 自定义播放器：进度、音量、倍速、画质、画中画、全屏、下一集
@@ -110,7 +130,11 @@ v0.1 是「多源搜索 + 播放器」，v0.2 重做首页与线路，v0.3 补�
 ### 互动
 
 - [x] 弹幕：滚动 / 顶部 / 底部、颜色、透明度、字号、开关，Canvas 渲染
-- [x] **B站弹幕导入**：B站番剧详情进入播放器时自动加载，最多 3000 条，6 小时文件缓存
+- [x] **B站弹幕导入**：B站番剧 + 已映射的 AniList 番剧进入播放器时自动加载，最多 3000 条，6 小时文件缓存
+- [x] **统一弹幕解析**：本地 / B站 / DanDanPlay 走同一个入口，带来源标记、合并去重
+- [x] **DanDanPlay provider**：审核已通过；签名、BGM/标题匹配、评论转换、SQLite 缓存已就绪，填入 AppId/Secret 即启用
+- [x] **手动弹幕校正**：按作品保存 B站/DanDan 偏移和 B站 season 覆盖，PV/特别篇错位可手动修
+- [x] **PWA / 手机**：manifest + Service Worker + 图标；局域网可看，HTTPS 下可安装
 - [x] 评论：昵称、正文、回复（`parentId`）、时间
 - [x] 数据本地持久化，随时可接 WebSocket
 
@@ -186,9 +210,23 @@ pnpm start
 | 中文评分/简介 | Bangumi `/v0/subjects/{id}`（反代） | 详情页覆盖评分、排名、中文简介 |
 | 本地缓存 | SQLite `data/bangumi.db` | 反代被墙时继续用评分/简介/集数 |
 | B站弹幕 | `pgc/view/web/season` + `x/v1/dm/list.so` | 按 cid 拉 XML，映射到播放时间 |
+| AniList→B站 | `bangumi-data` 的 bilibili media_id → media 页面 → season_id | 让已映射的 AniList 番剧也带 B站弹幕 |
 | 中文热度 | B 站 `pgc/season/index` + 详情 | 追番榜、播放榜、Hero |
 
 AniList 无需 Key，服务端 POST GraphQL，缓存 20–60 分钟。B 站接口带 `Referer`，缓存 15–60 分钟。Bangumi 通过 `BANGUMI_BASE` 反代访问，按 ID 直查，缓存 24 小时。
+
+**AniList 暂时不可用时：**
+
+2026-10-21 AniList 官方 API 返回 403：
+
+```json
+"The AniList API has been temporarily disabled due to severe stability issues."
+```
+
+这不是本机网络问题。服务端已加两层兜底：
+
+- AniList 成功结果同时写 `data/cache/json/`，之后 403 优先用旧数据；
+- 没有旧数据时，周表退回 **Bangumi 日历**；新番页合并 **B站 + Bangumi**（非 B站新番也能出现）；排行榜提示切到 B站；不再整页 403。
 
 ### Bangumi 接入（v0.6 已接通）
 
@@ -200,7 +238,7 @@ AniList 无需 Key，服务端 POST GraphQL，缓存 20–60 分钟。B 站接�
 
 **现在真实生效：**
 
-- `config.env` 里配置了 `BANGUMI_BASE=https://bgm.example.com`；
+- `config.env` 里配置了 `BANGUMI_BASE=https://api.dageiyuddd.cn`；
 - 打开 AniList 番剧详情，会自动显示 **Bangumi 评分 + 排名 + 中文简介**，并保留 `AniList 9.1` 作为副评分；
 - 实测《葬送的芙莉莲》：**Bangumi 8.5 / #43 / 中文简介**，AniList 9.1；
 - 实测《药屋少女的呢喃 第三季》：Bangumi 7.4 / #1336；
@@ -216,7 +254,7 @@ AniList 无需 Key，服务端 POST GraphQL，缓存 20–60 分钟。B 站接�
 **关于 `workers.dev` 和自定义域名：**
 
 - 原始 `bangumi-proxy...workers.dev` 在本机被 DNS 污染 + SNI 阻断；
-- 绑定自定义域名 `bgm.example.com` 后完全正常，Cloudflare 的 Worker 本身没问题；
+- 绑定自定义域名 `api.dageiyuddd.cn` 后完全正常，Cloudflare 的 Worker 本身没问题；
 - 换机器部署时，复制 `config.env.example` → `config.env`，填自己的反代地址即可。
 
 **为什么列表卡片还是 AniList：**
@@ -255,9 +293,64 @@ AniList 无需 Key，服务端 POST GraphQL，缓存 20–60 分钟。B 站接�
 
 **当前范围：**
 
-- 只对 **B站番剧详情** 自动生效（因为只有它天然有 `season_id`）；
-- AniList 详情、片源详情暂时没有 B站弹幕，需要后续做「标题 → B站 season」映射；
+- **B站番剧详情**天然有 `season_id`；
+- **AniList 番剧**通过 `bangumi-data` 的 bilibili `media_id` → B站 media 页面 → 真实 `season_id`；种子里有 **3,039 条**映射，有映射的 AniList 详情链接也会带 `?catalog=`；
+- **从片源详情直接进播放器**没有 `catalog` 时，会按标题自动查一次 B站 season，不需要手动带参数；
+- 没有映射的新番、片源详情暂时没有 B站弹幕；
 - 按**集数下标**映射；如果片源把 PV/特别篇混进正片，可能错位，后续加手动偏移。
+
+**统一弹幕架构（v0.8）：**
+
+播放器不再分别请求“本地弹幕”和“B站弹幕”，只请求：
+
+```text
+/api/danmaku/resolve?key=<source:vod:ep>&title=<标题>&ep=<集>&catalog=<B站season>
+```
+
+- 本地：始终读 `data/db.json`；
+- B站：有 `catalog` 时按 cid 拉；
+- DanDanPlay：配置了 `DANDAN_APP_ID` / `DANDAN_APP_SECRET` 时，按 Bangumi ID 或标题匹配；
+- 返回 `{ items, sources, warnings }`，`sources` 带每个源的数量；
+- 播放器只负责显示和发送本地弹幕，新增弹幕源不用改播放器。
+
+**手动集数校正：**
+
+播放器标题旁有「校正」按钮：
+
+- **B站偏移**：片源第 N 集 → B站第 N+偏移 集；
+- **DanDan 偏移**：片源第 N 集 → DanDan 第 N+偏移 集；
+- **B站 season**：留空自动，也可以手动填 `46089` 覆盖；
+- 按作品保存在 `data/db.json` 的 `danmakuMap[sourceId:vodId]`，所有集共用；
+- 保存后自动重新拉弹幕，不需要重启；
+- 「恢复自动」会清空该作品的校正。
+
+接口：
+
+```text
+GET  /api/danmaku/map?key=<sourceId:vodId>
+POST /api/danmaku/map  { key, biliOffset, dandanOffset, biliSeasonId }
+```
+
+![弹幕集数校正](docs/screenshots/danmaku-map.png)
+
+DanDanPlay 的 AppSecret 只存在服务端 `config.env`，不会进浏览器；签名是
+`base64(sha256(AppId + Timestamp + Path + AppSecret))`。
+
+**额度与缓存：**
+
+- `data/dandan.db`（SQLite WAL）保存：
+  - `dandan_result`：按标题+集缓存完整弹幕，6 小时；
+  - `dandan_anime`：按标题缓存 DanDan 匹配结果，7 天；
+  - `dandan_usage`：按天记录真实 API 调用次数。
+- 命中缓存不打 API；API 失败时回退旧缓存。
+- 无匹配负缓存 6 小时（`dandan_miss` / `dandan_anime` 的空 payload），避免同一集反复消耗额度。
+- `/sources` 底部有 DanDan 面板，显示缓存分集、匹配作品、今日/本月 API 次数、剩余额度。
+- 基础层实测额度：**610/天、14,640/月**；`DANDAN_DAILY_LIMIT` / `DANDAN_MONTHLY_LIMIT` 可改，达到上限后自动跳过 DanDan，保留本地/B站与旧缓存。
+- 单集展示上限 3000 条（原始数据仍进 SQLite），避免 7000+ 条弹幕把画面挤爆。
+- 真实验证：芙莉莲第 1 集 DanDan 返回 7304 条，首次 2 次 API、约 4.4 秒；重启后同集命中 SQLite，0 API、约 0.5 秒，展示 2435 条。
+- 无匹配测试：第一次 1 次 API，之后命中负缓存 0.015 秒、0 API。
+- 跨源续播：同一作品换源后按标题+集数找最近进度；实测 321 秒恢复。
+- 官方从 2026-06-25 起做项目分层与额度管理，具体日/月上限以 DevCenter 当前套餐为准；官方缓存建议：热门番 0.5–1 小时、老番 2–7 天。
 
 **参考项目是怎么做的：**
 
@@ -279,22 +372,45 @@ AniList 无需 Key，服务端 POST GraphQL，缓存 20–60 分钟。B 站接�
 
 这条比继续堆片源更符合「B 站 = 讨论度」的定位，已写进 `docs/鱼片记录.md` 的 P2。
 
-### 手机上看（下一步）
+### PWA / 手机（v0.8）
 
-现在还是「电脑上的本地 Web 站」，但手机可以直接访问：
+已经加好 PWA：
 
-1. 在 `config.env` 加一行 `HOST=0.0.0.0`；
+- `web/public/manifest.webmanifest`：名称、主题色、192/512 图标；
+- `web/public/sw.js`：缓存应用壳和静态资源，**不缓存 `/api`**；
+- `web/public/icons/`：192 / 512 / apple-touch；
+- `sw.js` 和 manifest 由服务端设为 `no-cache`，避免更新不了；
+- 移动端修了播放器顶部信息、弹幕输入框、片源卡片横向溢出、底部安全区；
+- 手机浏览器会拦截带声音的自动播放，视频停在 0 秒时弹幕不会启动；播放器加了「点击播放」大按钮，**强制调用 play()**，不再被“假播放”状态 pause 掉；
+- 全屏时调用 `screen.orientation.lock('landscape')`，退出时解锁；Chrome Android 实测全屏方向为 `landscape-primary`；
+- 夸克等浏览器可能自动静音；点音量图标会恢复到 85%，不是“按钮没反应”；
+- 手机控制条隐藏倍速、缩小按钮并加底部安全区，避免全屏键贴边；
+- 小米自带浏览器可能把视频放到原生最上层，Web 弹幕无法叠加；已加 `x5-video-player-type=h5` 等兼容属性，但仍建议用 Chrome/Quark；
+- 手机弹幕设置改成底部浮层，不再从右边被裁掉；
+- iOS Safari 的原生视频控件用 `::-webkit-media-controls` 隐藏，只保留自定义控制条；iOS 上禁用原生 PiP（避免画中画悬浮），桌面 PiP 仍可用；
+- 全屏按钮在 iOS 上回退到原生视频全屏。
+
+手机访问：
+
+1. `config.env` 已设 `HOST=0.0.0.0`；
 2. 电脑和手机连同一个 Wi-Fi；
-3. 手机浏览器打开 `http://电脑局域网IP:8787`。
+3. 打开 `http://电脑局域网IP:8787`（当前是 `http://192.168.1.4:8787`）。
 
-这样 B站弹幕、线路、收藏都能用，因为弹幕是服务端代理，不依赖手机直连 B站。`HOST=0.0.0.0` 只建议在家庭 Wi-Fi 用，不要把 8787 直接映射到公网。
+**关于「安装」：**
 
-想要「装到手机里」：
+- PWA 的 Service Worker 要求 **HTTPS 或 localhost**；
+- 当前已接 **Cloudflare 命名隧道**，稳定地址：
+  ```text
+  https://anime.dageiyuddd.cn
+  ```
+- 站点用**登录 Cookie** 保护：页面壳/manifest/sw 公开，API 需要登录；用户名/密码在 `config.env` 的 `AUTH_USER` / `AUTH_PASS`；
+- 隧道配置：`C:\Users\ASUS\.cloudflared\config.yml`；登录后自动启动脚本在启动目录 `bigfish-tunnel.vbs`；
+- 电脑上的 `tsx server/index.ts` 必须运行，隧道才有上游；否则 Cloudflare 返回 502；
+- 旧的 `trycloudflare.com` 临时隧道已停止，旧 PWA 图标会失效，需要从新域名重装。
 
-- **先做 PWA**：加 manifest + service worker，手机浏览器「添加到主屏幕」，体验接近 App；
-- **再考虑 Capacitor/Flutter 壳**：现在的 React 页面可以直接套 WebView，但后端仍需电脑/服务器跑；纯离线版要重写数据层。
+`HOST=0.0.0.0` 仍保留给局域网；公网入口由 Cloudflare 隧道负责，不要把 8787 端口直接映射出去。
 
-AniCh/Kazumi 是 Flutter 原生 App，所以能真正装到手机；我们目前是 Web + 本地服务，路线不同，但可以先做到 PWA。
+再往后才考虑 Capacitor/Flutter 壳：React 页面可以直接套 WebView，但后端仍在电脑上；纯离线版要重写数据层。AniCh/Kazumi 是 Flutter 原生 App，路线不同。
 
 ### 播放层：MacCMS / Kazumi
 
@@ -465,6 +581,8 @@ m3u8 文本 → 分片 / 子播放列表 / KEY URI 全部改写成 /api/proxy?ur
 │     ├─ bangumiDb.ts         # SQLite 缓存库（subject/episode/sync）
 │     ├─ bangumiPrefetch.ts   # 当季/收藏预热队列
 │     ├─ bilibiliDanmaku.ts   # B站弹幕：season → cid → XML
+│     ├─ dandan.ts            # DanDanPlay 签名 / 匹配 / 评论
+│     ├─ danmakuResolve.ts    # 统一弹幕：本地 + B站 + DanDan
 │     ├─ catalog.ts           # 首页聚合、片源严格匹配、跨源线路
 │     ├─ sources.ts           # 片源聚合、搜索、换源
 │     ├─ maccms.ts            # 苹果 CMS 适配器
@@ -477,13 +595,14 @@ m3u8 文本 → 分片 / 子播放列表 / KEY URI 全部改写成 /api/proxy?ur
 ├─ web/src/
 │  ├─ pages/                  # Home / Airing / Schedule / Ranking / Catalog / Detail / Player / Search / Library / Sources
 │  ├─ components/             # Sidebar / Hero / PosterCard / ScheduleSection / BangumiCachePanel / Stage …
+│  ├─ public/                 # manifest.webmanifest / sw.js / icons / favicon
 │  ├─ lib/                    # api / hooks / types / lineHealth
 │  ├─ styles.css              # 设计令牌 + 基础组件
 │  └─ styles-v02.css          # v0.2–v0.8 布局（侧栏 / Hero / 海报卡 / 周表）
 ├─ data/
 │  ├─ db.json                 # 运行时数据（历史/收藏/弹幕/评论/lineStats）
 │  ├─ bangumi.db              # Bangumi 元数据/集数缓存（WAL）
-│  └─ seed/anilist-zh.json    # 中文标题 + Bangumi ID 种子（2.6MB）
+│  └─ seed/anilist-zh.json    # 中文标题 + Bangumi/B站 ID 种子（3.0MB）
 ├─ dist/                      # 构建产物（start.bat 使用）
 ├─ docs/screenshots/
 ├─ scripts/                   # Playwright 截图 / 端到端自测 / sync-bangumi.mjs
@@ -528,6 +647,10 @@ m3u8 文本 → 分片 / 子播放列表 / KEY URI 全部改写成 /api/proxy?ur
 | POST | `/api/lines/health` | 批量探测线路健康度（`force` 可跳过缓存） |
 | POST | `/api/lines/report` | 上报真实播放成功/失败，累计 `lineStats` |
 | GET | `/api/danmaku/bilibili?season=&ep=` | B站弹幕（XML，按集 cid） |
+| GET | `/api/danmaku/resolve?key=&title=&ep=&catalog=` | 统一弹幕：本地 + B站 + DanDan |
+| GET | `/api/danmaku/map?key=` | 读取作品级集数校正 |
+| POST | `/api/danmaku/map` | 保存 B站/DanDan 偏移与 season 覆盖 |
+| GET | `/api/dandan/status` | DanDanPlay 是否配置 + SQLite 缓存/今日/本月 API 次数 |
 | GET | `/api/home` | 片源版首页（B 站不可用时的兜底） |
 | GET | `/api/search?q=` | 聚合搜索 |
 | GET | `/api/detail?sourceId=&vodId=` | 片源详情 + 线路 + 选集 |
@@ -551,8 +674,15 @@ m3u8 文本 → 分片 / 子播放列表 / KEY URI 全部改写成 /api/proxy?ur
 - **Bangumi 依赖反代刷新**：反代失效时旧缓存继续用（标「缓存 · X 天前」），但不会更新；缓存文件要定期备份 `data/bangumi.db`。
 - **Bangumi 中文搜索不稳定**：Worker 对中文关键词的搜索返回空，所以用 `bangumi-data` 的 ID 映射直查；未映射到 Bangumi 的新条目没有中文简介。
 - **评论/讨论未缓存**：Bangumi v0 API 不提供评论接口，Phase 2 才考虑抓 HTML。
-- **B站弹幕只覆盖 B站番剧详情**：AniList/片源详情还没有 season 映射；按集数下标对齐，PV/特别篇可能错位。
+- **B站弹幕覆盖有限**：B站详情 + 3,039 条已映射的 AniList 番剧；新番/无映射条目还没有，后续用 DanDanPlay 补。按集数下标对齐，PV/特别篇可能错位。
 - **B站弹幕上限 3000 条**：XML `maxlimit`；更多需改 `seg.so` 分页。
+- **DanDanPlay 额度有限**：基础层 610/天、14,640/月；已加 SQLite 缓存与额度保护，正常单集命中缓存不消耗 API。
+- **弹幕默认按集数下标匹配**：PV/特别篇混排时会错位，播放器「校正」里可手动偏移或覆盖 B站 season；还没有自动识别 PV/特别篇。
+- **PWA 安装需要 HTTPS**：局域网 `http://192.168.x.x` 只能用浏览器/快捷方式；当前公网用 Cloudflare 命名隧道 + 登录 Cookie，站点服务未启动时隧道会 502。
+- **为什么不用 Basic Auth**：Android WebAPK 安装器拉 manifest 时拿不到 Basic Auth，会一直卡安装；现在壳公开、API 用 Cookie 保护，安装器能正常读 manifest。
+- **不是 Cloudflare Access**：为了不绑定银行卡，没有走 Zero Trust 邮箱验证码；密码泄露后要改 `config.env` 并重启服务。
+- **PWA 离线只有壳**：API 和视频不缓存，离线打开只能看到界面，不能播放。
+- **小米自带浏览器可能不支持弹幕叠加**：它会把 `<video>` 放到原生视频层，DOM 的 Canvas 无法覆盖；这是浏览器实现限制，换 Chrome/Quark 或做原生壳才能解决。
 - **AniList 简介是英文**：未匹配到 Bangumi 时，详情页会标「英文简介 · AniList」。
 - **中文标题覆盖约 90%**：`bangumi-data` 未收录的新番会退回日文标题，片源匹配可能找不到。
 - **B 站评分偏高**：9.9 很多，适合看热度，不太适合当严格排名；高分榜已改用 AniList。

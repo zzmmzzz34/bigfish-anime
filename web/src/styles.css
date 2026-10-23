@@ -106,7 +106,8 @@ img {
 
 .clamp-1,
 .clamp-2,
-.clamp-3 {
+.clamp-3,
+.clamp-4 {
   display: -webkit-box;
   -webkit-box-orient: vertical;
   overflow: hidden;
@@ -119,6 +120,9 @@ img {
 }
 .clamp-3 {
   -webkit-line-clamp: 3;
+}
+.clamp-4 {
+  -webkit-line-clamp: 4;
 }
 
 /* ---------------- controls ---------------- */
@@ -1426,4 +1430,69 @@ textarea.input {
   position: absolute;
   inset: 0;
   background: linear-gradient(90deg, rgba(12, 14, 20, 0.98), rgba(12, 14, 20, 0.52));
+}
+
+/* PWA / mobile safe area */
+@media (max-width: 900px) {
+  .app-body {
+    padding-bottom: calc(66px + env(safe-area-inset-bottom));
+  }
+}
+
+/* 播放器顶部元信息：手机横向滚动，不换行 */
+.player-meta {
+  overflow-x: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.player-meta::-webkit-scrollbar {
+  display: none;
+}
+.player-meta > * {
+  flex: none;
+}
+.player-meta {
+  white-space: nowrap;
+}
+
+/* 安装为 PWA 后，避开 iPhone 刘海 */
+@media (display-mode: standalone) {
+  .site-header {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+}
+
+/* 隐藏 iOS Safari 的内置视频控件，使用我们自己的控制条 */
+video::-webkit-media-controls,
+video::-webkit-media-controls-enclosure,
+video::-webkit-media-controls-panel,
+video::-webkit-media-controls-start-playback-button {
+  display: none !important;
+  -webkit-appearance: none !important;
+}
+
+/* 手机播放器控制条更紧凑，避开底部安全区 */
+@media (max-width: 640px) {
+  .player-controls {
+    padding: 34px calc(8px + env(safe-area-inset-right)) calc(10px + env(safe-area-inset-bottom)) 8px;
+  }
+  .player-controls .player-btn {
+    width: 30px;
+    height: 30px;
+  }
+  .player-controls .player-time {
+    font-size: 11px;
+    margin-left: 2px;
+  }
+}
+
+/* 隐藏 Chromium / Android WebView 的暂停态原生播放圆钮，避免和自定义按钮叠成两个圆 */
+video::-webkit-media-controls-overlay-play-button,
+video::-internal-media-controls-overlay-play-button,
+video::-webkit-media-controls-play-button,
+video::-webkit-media-controls-start-playback-button {
+  display: none !important;
+  -webkit-appearance: none !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
 }

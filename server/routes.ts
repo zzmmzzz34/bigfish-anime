@@ -5,9 +5,15 @@ import { handleImage, handleProxy, resolveMedia } from './lib/proxy.js';
 import { getCatalogWork, homeDiscover, matchSourceWorks } from './lib/catalog.js';
 import { checkLines, getLineStat, recordLineReport } from './lib/health.js';
 import { getAiring, getIndex, getTimeline } from './lib/bilibili.js';
+import { getBiliCommunity } from './lib/bilibiliCommunity.js';
+import { getBiliMemes } from './lib/bilibiliMemes.js';
 import { getSeasonAnime, getTopAnime, getWeekSchedule } from './lib/anilist.js';
+import { getScheduleFallback } from './lib/scheduleFallback.js';
+import { getPlaySources } from './lib/playSources.js';
 import { checkBangumi } from './lib/bangumi.js';
 import { getBilibiliDanmaku } from './lib/bilibiliDanmaku.js';
+import { resolveDanmaku } from './lib/danmakuResolve.js';
+import { dandanStatus } from './lib/dandan.js';
 import { cacheStats } from './lib/bangumiDb.js';
 import {
   prefetchStatus,
@@ -15,10 +21,18 @@ import {
   type PrefetchScope,
 } from './lib/bangumiPrefetch.js';
 import { cacheClear } from './lib/http.js';
+import { authLogin, authLogout, authStatus } from './lib/auth.js';
 import { titleKey } from './lib/util.js';
+import { manualAdd, manualList, manualRemove, manualWorks } from './lib/manualMatches.js';
+import { seedSyncStatus, startSeedSync } from './lib/seedSync.js';
+import { backupData, backupStatus, importBackup } from './lib/backup.js';
 import type { Comment, Danmaku, Source } from './lib/types.js';
 
 export const api = Router();
+
+api.get('/auth/status', authStatus);
+api.post('/auth/login', authLogin);
+api.post('/auth/logout', authLogout);
 
 const wrap =
   (fn: (req: any, res: any) => Promise<any>) =>
@@ -31,6 +45,111 @@ const wrap =
 api.get('/health', (_req, res) => {
   res.json({ ok: true, time: Date.now(), sources: listSources().length });
 });
+
+api.get('/match/alias', (req, res) => {
+  const title = String(req.query.title || '').trim();
+  if (!title) return res.status(400).json({ error: '缺少标题' });
+  const key = titleKey(title);
+  res.json({ key, title, alias: getDb().matchAlias[key] || '' });
+});
+
+api.post('/match/alias', (req, res) => {
+  const title = String(req.body?.title || '').trim();
+  const alias = String(req.body?.alias || '').trim().slice(0, 80);
+  if (!title) return res.status(400).json({ error: '缺少标题' });
+  const db = getDb();
+  const key = titleKey(title);
+  db.matchAlias ||= {};
+  if (alias) db.matchAlias[key] = alias;
+  else delete db.matchAlias[key];
+  saveDb();
+  res.json({ key, title, alias });
+});
+
+api.get('/backup/export', (_req, res) => {
+  const payload = backupData();
+  const stamp = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Disposition', `attachment; filename="bigfish-backup-${stamp}.json"`);
+  res.setHeader('Content-Type', 'application/json; charset=utf-8');
+  res.send(JSON.stringify(payload, null, 2));
+});
+
+api.get('/backup/status', (_req, res) => {
+  res.json(backupStatus());
+});
+
+api.post('/backup/import', (req, res) => {
+  try {
+    res.json({ ok: true, ...importBackup(req.body) });
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message || '导入失败' });
+  }
+});
+
+api.get('/seed/status', (_req, res) => {
+  res.json(seedSyncStatus());
+});
+
+api.post('/seed/sync', (_req, res) => {
+  res.json(startSeedSync());
+});
+
+api.get('/manual-matches', (req, res) => {
+  const title = String(req.query.title || '').trim();
+  if (!title) return res.status(400).json({ error: '缺少标题' });
+  res.json({ title, items: manualList(title) });
+});
+
+api.post('/manual-matches', async (req, res) => {
+  try {
+    const title = String(req.body?.title || '').trim();
+    const sourceId = String(req.body?.sourceId || '').trim();
+    const vodId = String(req.body?.vodId || '').trim();
+    if (!title || !sourceId || !vodId) {
+      return res.status(400).json({ error: '缺少标题、片源或作品 ID' });
+    }
+    const source = getSource(sourceId);
+    if (!source) return res.status(404).json({ error: '片源不存在' });
+    const detail = await detailSource(source, vodId);
+    if (!detail) return res.status(404).json({ error: '片源作品不存在或已下架' });
+    manualAdd(title, {
+      sourceId,
+      sourceName: source.name,
+      vodId,
+      title: detail.title,
+      cover: detail.cover,
+      year: detail.year,
+      remarks: detail.remarks,
+      createdAt: Date.now(),
+    });
+    saveDb();
+    res.json({ ok: true, items: manualList(title) });
+  } catch (err: any) {
+    res.status(err?.status || 500).json({ error: err?.message || '绑定失败' });
+  }
+});
+
+api.delete('/manual-matches', (req, res) => {
+  const title = String(req.query.title || '').trim();
+  const sourceId = String(req.query.sourceId || '').trim();
+  const vodId = String(req.query.vodId || '').trim();
+  if (!title || !sourceId || !vodId) {
+    return res.status(400).json({ error: '缺少标题、片源或作品 ID' });
+  }
+  manualRemove(title, sourceId, vodId);
+  saveDb();
+  res.json({ ok: true, items: manualList(title) });
+});
+
+api.get(
+  '/play-sources',
+  wrap(async (req, res) => {
+    const title = String(req.query.title || '').trim();
+    const exclude = String(req.query.exclude || '').trim();
+    if (!title) return res.status(400).json({ error: '缺少 title' });
+    res.json({ items: await getPlaySources(title, exclude) });
+  }),
+);
 
 /* ---------------- 片源管理 ---------------- */
 
@@ -154,6 +273,23 @@ api.get(
   }),
 );
 
+api.get(
+  '/bilibili/community',
+  wrap(async (req, res) => {
+    const season = String(req.query.season || '').trim();
+    if (!season) return res.status(400).json({ error: '缺少 season' });
+    res.json(await getBiliCommunity(season));
+  }),
+);
+
+api.get(
+  '/bilibili/memes',
+  wrap(async (req, res) => {
+    const limit = Number(req.query.limit) || 10;
+    res.json({ items: await getBiliMemes(limit) });
+  }),
+);
+
 /* ---------------- AniList：新番 / 高分 / 周表 ---------------- */
 
 api.get(
@@ -173,7 +309,21 @@ api.get(
 api.get(
   '/anilist/week',
   wrap(async (_req, res) => {
-    res.json({ days: await getWeekSchedule() });
+    try {
+      res.json({ days: await getWeekSchedule() });
+    } catch (err: any) {
+      console.warn('[anilist] week failed, using fallback:', err?.message || err);
+      const fb = await getScheduleFallback();
+      res.json({ days: fb.days, fallback: fb.source });
+    }
+  }),
+);
+
+api.get(
+  '/bangumi/week',
+  wrap(async (_req, res) => {
+    const fb = await getScheduleFallback();
+    res.json({ days: fb.source === 'bangumi' ? fb.days : [], source: fb.source });
   }),
 );
 
@@ -224,7 +374,8 @@ api.get(
   '/catalog/:id/matches',
   wrap(async (req, res) => {
     const work = await getCatalogWork(req.params.id);
-    const matches = await matchSourceWorks(work.title);
+    const alias = getDb().matchAlias[titleKey(work.title)] || '';
+    const matches = await matchSourceWorks(work.title, alias);
     res.json({ title: work.title, matches });
   }),
 );
@@ -265,7 +416,15 @@ api.get(
   wrap(async (req, res) => {
     const title = String(req.query.title || '').trim();
     if (!title) return res.status(400).json({ error: '缺少标题' });
-    const items = await alternates(title, String(req.query.exclude || ''));
+    const alias = getDb().matchAlias[titleKey(title)] || '';
+    const items = await alternates(title, String(req.query.exclude || ''), alias);
+    const seen = new Set(items.map((w) => w.key));
+    for (const w of manualWorks(title)) {
+      if (!seen.has(w.key)) {
+        items.unshift(w);
+        seen.add(w.key);
+      }
+    }
     res.json({ items });
   }),
 );
@@ -282,6 +441,70 @@ api.get(
 /* ---------------- 弹幕 / 评论 ---------------- */
 
 api.get(
+  '/danmaku/resolve',
+  wrap(async (req, res) => {
+    const key = String(req.query.key || '');
+    if (!key) return res.status(400).json({ error: '缺少 key' });
+    const rawPriority = String(req.query.priority || 'merge');
+    const priority = ['merge', 'bilibili', 'dandan', 'local'].includes(rawPriority)
+      ? (rawPriority as 'merge' | 'bilibili' | 'dandan' | 'local')
+      : 'merge';
+    res.json(
+      await resolveDanmaku({
+        key,
+        title: String(req.query.title || ''),
+        ep: Math.max(0, Number(req.query.ep) || 0),
+        catalogSeason: Number(req.query.catalog) || 0,
+        priority,
+      }),
+    );
+  }),
+);
+
+api.get('/dandan/status', (_req, res) => {
+  res.json(dandanStatus());
+});
+
+/** 兼容作品 key（source:vod）和集 key（source:vod:ep） */
+function danmakuMapKey(raw: string) {
+  const parts = raw.split(':');
+  return parts.length >= 3 ? parts.slice(0, -1).join(':') : raw;
+}
+
+api.get('/danmaku/map', (req, res) => {
+  const key = danmakuMapKey(String(req.query.key || ''));
+  if (!key) return res.status(400).json({ error: '缺少 key' });
+  res.json({ key, map: getDb().danmakuMap[key] || {} });
+});
+
+api.post('/danmaku/map', (req, res) => {
+  const key = danmakuMapKey(String(req.body?.key || ''));
+  if (!key) return res.status(400).json({ error: '缺少 key' });
+
+  const clamp = (value: unknown) => {
+    const n = Math.round(Number(value) || 0);
+    return Math.max(-99, Math.min(99, n));
+  };
+  const biliOffset = clamp(req.body?.biliOffset);
+  const dandanOffset = clamp(req.body?.dandanOffset);
+  const season = Math.max(0, Math.round(Number(req.body?.biliSeasonId) || 0));
+  const db = getDb();
+
+  if (!biliOffset && !dandanOffset && !season) {
+    delete db.danmakuMap[key];
+  } else {
+    db.danmakuMap[key] = {
+      biliOffset,
+      dandanOffset,
+      biliSeasonId: season,
+      updatedAt: Date.now(),
+    };
+  }
+  saveDb();
+  res.json({ key, map: db.danmakuMap[key] || {} });
+});
+
+api.get(
   '/danmaku/bilibili',
   wrap(async (req, res) => {
     const season = Number(req.query.season);
@@ -296,7 +519,7 @@ api.get(
 api.get('/danmaku', (req, res) => {
   const key = String(req.query.key || '');
   if (!key) return res.status(400).json({ error: '缺少 key' });
-  res.json(getDb().danmaku[key] || []);
+  res.json((getDb().danmaku[key] || []).map((item) => ({ ...item, source: 'local' })));
 });
 
 api.post('/danmaku', (req, res) => {
@@ -311,6 +534,7 @@ api.post('/danmaku', (req, res) => {
     mode: mode === 'top' || mode === 'bottom' ? mode : 'scroll',
     time: Math.max(0, Number(time) || 0),
     createdAt: Date.now(),
+    source: 'local',
   };
   (db.danmaku[item.key] ||= []).push(item);
   if (db.danmaku[item.key].length > 4000) db.danmaku[item.key].splice(0, 500);

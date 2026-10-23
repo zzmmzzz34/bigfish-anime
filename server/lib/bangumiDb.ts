@@ -107,6 +107,7 @@ function getDb() {
     db.exec('PRAGMA journal_mode = WAL');
     db.exec('PRAGMA synchronous = NORMAL');
     db.exec('PRAGMA busy_timeout = 5000');
+    db.exec('PRAGMA wal_autocheckpoint = 1000');
     db.exec(SCHEMA);
     console.log(`[bangumi] 缓存库 ${DB_FILE}`);
   } catch (err: any) {

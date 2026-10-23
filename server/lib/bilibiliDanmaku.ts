@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { CACHE_DIR, UA } from './config.js';
 import { cached, stripHtml } from './http.js';
+import { bilibiliMediaIdFor } from './anilistZh.js';
 
 export interface BiliDanmakuItem {
   id: string;
@@ -11,12 +12,15 @@ export interface BiliDanmakuItem {
   mode: 'scroll' | 'top' | 'bottom';
   time: number;
   createdAt: number;
+  source: 'bilibili';
 }
 
 export interface BiliEpisode {
   index: number;
   id: number;
+  aid: number;
   cid: number;
+  bvid: string;
   title: string;
   longTitle: string;
   cover: string;
@@ -41,14 +45,16 @@ async function biliGetJson(pathname: string) {
 }
 
 export async function getBiliEpisodes(seasonId: number): Promise<BiliEpisode[]> {
-  return cached(`bili:season:${seasonId}`, 60 * 60_000, async () => {
+  return cached(`bili:dm-season:${seasonId}`, 60 * 60_000, async () => {
     const result = await biliGetJson(`/pgc/view/web/season?season_id=${seasonId}`);
     const eps = Array.isArray(result?.episodes) ? result.episodes : [];
     if (!eps.length) throw new Error('这部番没有可用的 B站分集');
     return eps.map((ep: any, index: number) => ({
       index,
       id: Number(ep.id) || 0,
+      aid: Number(ep.aid) || 0,
       cid: Number(ep.cid) || 0,
+      bvid: String(ep.bvid || ''),
       title: String(ep.title || index + 1),
       longTitle: String(ep.long_title || ep.title || ''),
       cover: String(ep.cover || ''),
@@ -86,6 +92,7 @@ function parseXml(xml: string, cid: number): BiliDanmakuItem[] {
       mode: modeOf(Number(parts[1]) || 1),
       time: Math.round(time * 100) / 100,
       createdAt: 0,
+      source: 'bilibili',
     });
     if (items.length >= 3000) break;
   }
@@ -128,6 +135,40 @@ async function loadDanmaku(cid: number, pid: number): Promise<BiliDanmakuItem[]>
     /* 缓存写失败不影响播放 */
   }
   return items;
+}
+
+/** AniList 条目 -> B站 media 页面 -> 真实 season_id */
+export async function biliSeasonForAniList(
+  aniListId: number | string | undefined,
+  titles: string[],
+) {
+  const mediaId = bilibiliMediaIdFor(aniListId, titles);
+  if (!mediaId) return 0;
+  return cached(`bili:media:${mediaId}`, 30 * 24 * 3600_000, async () => {
+    const res = await fetch(`https://www.bilibili.com/bangumi/media/md${mediaId}/`, {
+      headers: {
+        ...HEADERS,
+        Accept: 'text/html,application/xhtml+xml',
+      },
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!res.ok) throw new Error(`B站 media 页面 HTTP ${res.status}`);
+    const html = await res.text();
+    const counts = new Map<number, number>();
+    for (const m of html.matchAll(/"season_id":(\d+)/g)) {
+      const id = Number(m[1]);
+      if (id > 0) counts.set(id, (counts.get(id) || 0) + 1);
+    }
+    let best = 0;
+    let bestCount = 0;
+    for (const [id, count] of counts) {
+      if (count > bestCount) {
+        best = id;
+        bestCount = count;
+      }
+    }
+    return best;
+  });
 }
 
 export async function getBilibiliDanmaku(seasonId: number, epIndex: number) {

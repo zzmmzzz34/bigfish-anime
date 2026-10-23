@@ -1,7 +1,8 @@
-import { cached, stripHtml } from './http.js';
+import { cachedPersistent, stripHtml } from './http.js';
 import { UA } from './config.js';
 import { zhTitle } from './anilistZh.js';
 import { enrichBangumi } from './bangumi.js';
+import { biliSeasonForAniList } from './bilibiliDanmaku.js';
 
 const ENDPOINT = 'https://graphql.anilist.co';
 
@@ -69,6 +70,7 @@ export interface AniScheduleItem extends AniCard {
   airingAt: number;
   episode: number;
   timeText: string;
+  href?: string;
 }
 
 export interface AniWeekDay {
@@ -203,7 +205,7 @@ export function currentSeason() {
 
 export async function getSeasonAnime(perPage = 30) {
   const { season, year } = currentSeason();
-  return cached(`anilist:season:${season}:${year}:${perPage}`, 30 * 60_000, async () => {
+  return cachedPersistent(`anilist:season:${season}:${year}:${perPage}`, 30 * 60_000, async () => {
     const data = await gql<any>(
       `query($season: MediaSeason, $year: Int, $per: Int) {
         Page(page: 1, perPage: $per) {
@@ -218,7 +220,7 @@ export async function getSeasonAnime(perPage = 30) {
 }
 
 export async function getTopAnime(perPage = 30) {
-  return cached(`anilist:top:${perPage}`, 60 * 60_000, async () => {
+  return cachedPersistent(`anilist:top:${perPage}`, 60 * 60_000, async () => {
     const data = await gql<any>(
       `query($per: Int) {
         Page(page: 1, perPage: $per) {
@@ -233,7 +235,7 @@ export async function getTopAnime(perPage = 30) {
 }
 
 export async function getWeekSchedule(): Promise<AniWeekDay[]> {
-  return cached('anilist:week', 20 * 60_000, async () => {
+  return cachedPersistent('anilist:week', 20 * 60_000, async () => {
     const nowSh = new Date(Date.now() + SH_OFFSET);
     const dayIdx = (nowSh.getUTCDay() + 6) % 7;
     const mondayUtc = Date.UTC(
@@ -297,7 +299,7 @@ export async function getWeekSchedule(): Promise<AniWeekDay[]> {
 }
 
 export async function getAniListWork(id: string) {
-  return cached(`anilist:detail:${id}`, 60 * 60_000, async () => {
+  return cachedPersistent(`anilist:detail:${id}`, 60 * 60_000, async () => {
     const data = await gql<any>(
       `query($id: Int) {
         Media(id: $id, type: ANIME) {
@@ -310,7 +312,10 @@ export async function getAniListWork(id: string) {
     const card = normalize(data.Media);
     const studio =
       (data.Media?.studios?.nodes || []).find((n: any) => n.isAnimationStudio)?.name || '';
-    const bgm = await enrichBangumi(card.title, card.id).catch(() => null);
+    const [bgm, biliSeason] = await Promise.all([
+      enrichBangumi(card.title, card.id).catch(() => null),
+      biliSeasonForAniList(card.id, [card.title, card.nativeTitle, card.englishTitle]).catch(() => 0),
+    ]);
     const title = bgm?.nameCn || card.title;
     const score = bgm?.score || card.score;
     return {
@@ -327,6 +332,7 @@ export async function getAniListWork(id: string) {
       bangumiRatingTotal: bgm?.ratingTotal || 0,
       bangumiCachedAt: bgm?.fetchedAt || 0,
       bangumiStale: Boolean(bgm?.stale),
+      biliSeasonId: biliSeason || 0,
       ratingCount: 0,
       orderText: card.popularityText,
       isFinish: card.status === 'FINISHED',

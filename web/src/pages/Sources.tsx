@@ -16,6 +16,9 @@ import { apiDelete, apiGet, apiPost } from '../lib/api';
 import { useApi, useTitle } from '../lib/hooks';
 import { useToast } from '../components/Toast';
 import BangumiCachePanel from '../components/BangumiCachePanel';
+import BackupPanel from '../components/BackupPanel';
+import DanDanPanel from '../components/DanDanPanel';
+import SeedPanel from '../components/SeedPanel';
 import type { Source, SourceTest } from '../lib/types';
 
 interface Draft {
@@ -222,7 +225,7 @@ export default function Sources() {
           return (
             <div
               key={s.id}
-              className={`relative rounded-xl border p-4 transition-colors ${
+              className={`relative min-w-0 overflow-hidden rounded-xl border p-4 transition-colors ${
                 s.enabled
                   ? 'border-white/[0.08] bg-white/[0.03]'
                   : 'border-white/[0.05] bg-white/[0.012] opacity-60'
@@ -453,7 +456,10 @@ export default function Sources() {
         </div>
       )}
 
-      <div className="mt-8">
+      <div className="mt-8 space-y-4">
+        <BackupPanel />
+        <SeedPanel />
+        <DanDanPanel />
         <BangumiCachePanel />
       </div>
     </div>
